@@ -1,0 +1,10 @@
+{
+  "name": "tradebook",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "松井証券向け 損益計算Webアプリ（クライアント完結型・Google Drive連携）",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}

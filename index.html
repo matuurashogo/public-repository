@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="theme-color" content="#ffffff" />
+  <title>TradeBook — 損益計算</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <header class="header">
+    <h1>TradeBook</h1>
+    <div id="sync" class="sync"><span class="dot"></span><span id="sync-text">未サインイン</span></div>
+  </header>
+
+  <!-- サインイン導線 -->
+  <div id="signin-bar" class="signin-bar">
+    <button id="signin-btn" class="signin-btn">Googleでサインインして同期</button>
+    <p id="signin-note" class="signin-note"></p>
+  </div>
+
+  <!-- 損益サマリー -->
+  <section class="card">
+    <div class="card-title">損益サマリー</div>
+    <div class="seg" id="seg">
+      <button data-axis="year">年間</button>
+      <button data-axis="month" class="active">月間</button>
+      <button data-axis="code">銘柄別</button>
+    </div>
+    <div class="summary-main">
+      <div class="label" id="hero-label">税引後損益</div>
+      <div class="value" id="hero-value">±0<span class="yen">円</span></div>
+    </div>
+    <div class="summary-sub">
+      <div><div class="k">税引前</div><div class="v" id="hero-gross">±0</div></div>
+      <div><div class="k">概算税(20.315%)</div><div class="v" id="hero-tax">0</div></div>
+    </div>
+    <table id="summary-table">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- 累積損益グラフ -->
+  <section class="card">
+    <div class="card-title">累積損益の推移</div>
+    <div class="chart-wrap"><canvas id="cum-chart"></canvas></div>
+  </section>
+
+  <!-- 取引追加 -->
+  <button id="add-toggle" class="add-btn">＋ 取引を追加</button>
+  <section class="card form-card" id="form-card" hidden>
+    <div class="card-title" id="form-title">取引を追加</div>
+    <form id="trade-form">
+      <label>約定日<input type="date" id="f-date" required /></label>
+      <label>銘柄コード
+        <input type="text" id="f-code" inputmode="numeric" pattern="\d{4}" maxlength="4" placeholder="7203" required />
+        <span id="f-name" class="f-name"></span>
+      </label>
+      <div class="side-toggle" id="f-side">
+        <button type="button" data-side="買" class="active">買</button>
+        <button type="button" data-side="売">売</button>
+      </div>
+      <label>数量（株）<input type="number" id="f-qty" inputmode="numeric" min="1" step="1" placeholder="100" required /></label>
+      <label>約定単価（円）<input type="number" id="f-price" inputmode="decimal" min="0" step="0.1" placeholder="2850" required /></label>
+      <div class="form-actions">
+        <button type="button" id="form-cancel" class="btn-ghost">キャンセル</button>
+        <button type="submit" id="form-submit" class="btn-primary">追加する</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- 取引履歴 -->
+  <section class="card">
+    <div class="card-title">取引履歴</div>
+    <div id="trade-list"></div>
+    <p id="empty-note" class="empty-note">まだ取引がありません。「＋ 取引を追加」から記録を始めましょう。</p>
+  </section>
+
+  <!-- Chart.js（同梱・オフライン可） -->
+  <script src="./js/vendor/chart.umd.min.js"></script>
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- アプリ本体 -->
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
