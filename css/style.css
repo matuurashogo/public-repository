@@ -41,6 +41,16 @@ body {
 .signin-note { font-size: 12px; color: #8a8a8e; margin-top: 8px; line-height: 1.5; }
 .signin-bar.hidden { display: none; }
 
+/* 入力警告バナー */
+.warn-banner { margin: 12px 14px 0; background: #fff7e6; border: 1px solid #ffe1a3;
+  border-radius: 12px; padding: 11px 13px; color: #8a5a00; }
+.warn-banner.hidden { display: none; }
+.warn-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.warn-item { font-size: 12px; line-height: 1.5; }
+
+/* 集計表の注記 */
+.summary-note { font-size: 11px; color: #8a8a8e; margin-top: 10px; line-height: 1.5; }
+
 /* カード */
 .card { background: #fff; border-radius: 16px; margin: 14px 14px 0; padding: 16px 16px 18px;
         box-shadow: 0 1px 3px rgba(0,0,0,.05); }
@@ -138,6 +148,15 @@ tr:last-child td { border-bottom: 0; }
                       font-size: 15px; font-weight: 700; color: #6a6a6e; cursor: pointer; }
 .side-toggle button.active[data-side="買"] { background: #e9f0ff; color: #0a64d6; border-color: #b9d2ff; }
 .side-toggle button.active[data-side="売"] { background: #ffeaea; color: var(--loss); border-color: #ffc4c4; }
+/* 口座区分トグル */
+.field-label { font-size: 12px; color: #6a6a6e; font-weight: 600; }
+.acct-toggle { display: flex; gap: 8px; }
+.acct-toggle button { flex: 1; padding: 11px; border: 1px solid #d8d8dd; border-radius: 10px; background: #fafafa;
+  font-size: 14px; font-weight: 700; color: #6a6a6e; cursor: pointer; }
+.acct-toggle button.active { background: #eaf6ee; color: var(--gain); border-color: #b6e0c4; }
+/* 取引履歴の NISA タグ */
+.acct-tag { font-size: 10px; font-weight: 700; color: var(--gain); background: #eaf6ee;
+  border: 1px solid #c9e7d4; padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: middle; }
 .form-actions { display: flex; gap: 10px; margin-top: 4px; }
 .btn-primary { flex: 2; padding: 14px; border: 0; border-radius: 12px; background: var(--blue); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
 .btn-ghost { flex: 1; padding: 14px; border: 1px solid #d8d8dd; border-radius: 12px; background: #fff; color: #6a6a6e; font-size: 15px; font-weight: 600; cursor: pointer; }
