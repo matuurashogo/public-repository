@@ -291,3 +291,28 @@ export function calcKpis(trades, year) {
     pnls: sells.map((r) => r.pnl), // ヒストグラム用
   };
 }
+
+// 損益配列を「0を中心に左右対称な等幅ビン」へ振り分ける純粋関数（ヒストグラム用）。
+// 最大絶対損益を span とし、[-span, +span] を binCount 等分する。
+// 戻り値: [{ lo, hi, mid, count, sign("loss"|"gain") }]（空入力は []）
+export function histogramBins(pnls, binCount = 7) {
+  if (!pnls || pnls.length === 0) return [];
+  const span = Math.max(Math.abs(Math.max(...pnls)), Math.abs(Math.min(...pnls))) || 1;
+  const width = (span * 2) / binCount;
+  const start = -span;
+
+  const bins = [];
+  for (let i = 0; i < binCount; i++) {
+    const lo = start + i * width;
+    const hi = lo + width;
+    const mid = (lo + hi) / 2;
+    bins.push({ lo, hi, mid, count: 0, sign: mid < 0 ? "loss" : "gain" });
+  }
+  for (const v of pnls) {
+    let idx = Math.floor((v - start) / width);
+    if (idx < 0) idx = 0;
+    if (idx >= binCount) idx = binCount - 1;
+    bins[idx].count++;
+  }
+  return bins;
+}

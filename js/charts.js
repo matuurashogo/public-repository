@@ -1,7 +1,7 @@
 // 累積損益の折れ線グラフ（Chart.js 同梱版を利用）
 // Chart は js/vendor/chart.umd.min.js が <script> で読み込み、グローバルに公開される。
 
-import { cumulative } from "./pnl.js";
+import { cumulative, histogramBins } from "./pnl.js";
 
 let _chart = null;
 
@@ -94,36 +94,16 @@ export function renderHistogram(canvas, pnls) {
     _hist = null;
   }
   const ctx = canvas.getContext("2d");
-  if (!pnls || pnls.length === 0) {
+  // ビン分けは純粋関数 histogramBins() に委譲（テスト対象）。空入力は []
+  const bins = histogramBins(pnls, 7);
+  if (bins.length === 0) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     return;
   }
 
-  // 0 を境界に含む等幅ビン（損益の符号が混ざらないようにする）
-  const max = Math.max(...pnls);
-  const min = Math.min(...pnls);
-  const span = Math.max(Math.abs(max), Math.abs(min)) || 1;
-  const BINS = 7; // 0 の左右で対称な奇数ビン
-  const width = (span * 2) / BINS;
-  const start = -span;
-
-  const counts = new Array(BINS).fill(0);
-  for (const v of pnls) {
-    let idx = Math.floor((v - start) / width);
-    if (idx < 0) idx = 0;
-    if (idx >= BINS) idx = BINS - 1;
-    counts[idx]++;
-  }
-
-  const labels = [];
-  const colors = [];
-  for (let i = 0; i < BINS; i++) {
-    const lo = start + i * width;
-    const hi = lo + width;
-    const mid = (lo + hi) / 2;
-    labels.push(shortYen(lo) + "〜" + shortYen(hi));
-    colors.push(mid < 0 ? LOSS : GAIN);
-  }
+  const counts = bins.map((b) => b.count);
+  const labels = bins.map((b) => shortYen(b.lo) + "〜" + shortYen(b.hi));
+  const colors = bins.map((b) => (b.sign === "loss" ? LOSS : GAIN));
 
   _hist = new window.Chart(ctx, {
     type: "bar",
