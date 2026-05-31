@@ -21,6 +21,8 @@
 - `js/store.js`: マスター状態管理＋localStorage読み取りキャッシュ。
 - `js/drive.js` + `js/config.js`: Google Drive連携（`drive.file`スコープ、OAuthトークンフロー）。
 - `js/stocks.js` + `data/stocks.json`: コード→銘柄名 自動表示（約3,800銘柄。主データ=subsector_master 約2,200 ＋ jquants-data の `full/` `company` 列から不足分を補完）。
+- `js/prices.js` + `data/latest_prices.json`: 最新終値（jquants-data の `prices_latest`）を読み、保有銘柄カードに**含み損益（評価損益・未実現）**を表示。`pnl.js` の `calcUnrealized()` で算出（`tests/unrealized.test.js` で7件PASS）。設計: `docs/plans/2026-05-31-tradebook-holdings-pnl-design.md`。
+- `tools/gen_prices.py` + `.github/workflows/update-prices.yml`: `latest_prices.json` を jquants-data から生成。Actions が毎日 07:30 JST に自動再生成・コミット（要 Secret `JQUANTS_DATA_TOKEN` = jquants-data 読取用 Fine-grained PAT）。
 - `index.html` / `css/style.css` / `manifest.webmanifest` / `sw.js` / `icons/`: UIとPWA一式。
 - `README.md` / `DEPLOY.md`: 利用・デプロイ手順。
 

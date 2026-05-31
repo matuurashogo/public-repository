@@ -1,0 +1,88 @@
+name: Update latest prices
+
+# jquants-data（private）の最新終値から data/latest_prices.json を再生成して
+# 変更があれば自動コミットする。保有銘柄カードの含み損益を最新に保つため。
+#
+# 認証: jquants-data を読むための Fine-grained PAT（Contents: Read）を
+#       リポジトリ Secret `JQUANTS_DATA_TOKEN` に登録しておくこと。
+
+on:
+  schedule:
+    # jquants-data は平日 07:00 JST 更新想定。その後 07:30 JST = 22:30 UTC に実行。
+    - cron: "30 22 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-prices
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout public repo
+        uses: actions/checkout@v4
+
+      - name: Fetch prices_latest.parquet from jquants-data (sparse)
+        env:
+          GH_TOKEN: ${{ secrets.JQUANTS_DATA_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Secret JQUANTS_DATA_TOKEN が未設定です。jquants-data 読み取り用の Fine-grained PAT を登録してください。"
+            exit 1
+          fi
+          # 72MB 全体は不要。sparse-checkout で prices/ のみ・blobless で軽量取得。
+          git clone --filter=blob:none --no-checkout --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/matuurashogo/jquants-data.git" jq
+          cd jq
+          git sparse-checkout init --cone
+          git sparse-checkout set prices
+          git checkout
+          test -f prices/prices_latest.parquet
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pyarrow
+        run: pip install --quiet pyarrow
+
+      - name: Generate latest_prices.json
+        env:
+          JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
+        run: python tools/gen_prices.py
+
+      - name: Bump service worker cache version if prices changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- data/latest_prices.json; then
+            echo "価格に変更なし（休市日など）。コミットしません。"
+            echo "changed=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_ENV"
+          # sw.js のキャッシュ版数を +1 して、PWA に新しい価格を確実に配信する。
+          current=$(grep -oE 'tradebook-shell-v[0-9]+' sw.js | grep -oE '[0-9]+$')
+          next=$((current + 1))
+          sed -i "s/tradebook-shell-v${current}/tradebook-shell-v${next}/" sw.js
+          echo "sw cache: v${current} -> v${next}"
+
+      - name: Commit and push
+        if: env.changed == 'true'
+        run: |
+          set -euo pipefail
+          date=$(python -c "import json;print(json.load(open('data/latest_prices.json'))['date'])")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/latest_prices.json sw.js
+          git commit -m "最新終値を更新（基準日 ${date}）"
+          git push
+
+      - name: Clean up
+        if: always()
+        run: rm -rf jq

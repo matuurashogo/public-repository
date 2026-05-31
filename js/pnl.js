@@ -158,6 +158,84 @@ export function aggregate(records, axis, nameResolver) {
   return rows;
 }
 
+// 保有銘柄の含み損益（未実現・評価損益）を算出する純粋関数。
+// holdings : calcRealized が返す { code: { quantity, cost } }（cost は手数料込み取得原価）
+// priceMap : { code: number } 最新終値（4桁コード→価格）。無い銘柄は評価不能。
+// 戻り値: { rows, total }
+//   rows: [{ code, quantity, cost, avg, price, marketValue, unrealized, unrealizedRate, priced }]
+//     price/ marketValue/ unrealized/ unrealizedRate は価格欠損時 null、priced=false。
+//     並び順は評価額（無い場合は取得原価）の大きい順。
+//   total: { cost, marketValue, unrealized, unrealizedRate, pricedCount, unpricedCount, pricedAll }
+//     合計は「価格が取れた保有銘柄のみ」で算出する。cost も価格が取れた分のみ集計し、
+//     含み損益率の分母と整合させる（pricedAll=false のとき一部除外をUIで注記する）。
+export function calcUnrealized(holdings, priceMap) {
+  const map = priceMap || {};
+  const rows = [];
+  let totalPricedCost = 0;
+  let totalMarketValue = 0;
+  let pricedCount = 0;
+  let unpricedCount = 0;
+
+  for (const [code, h] of Object.entries(holdings || {})) {
+    const quantity = Number(h.quantity);
+    if (!(quantity > 0)) continue; // 保有のみ対象
+    const cost = Number(h.cost);
+    const avg = cost / quantity;
+
+    const raw = map[String(code)];
+    const priced = typeof raw === "number" && isFinite(raw);
+
+    if (priced) {
+      const marketValue = raw * quantity;
+      const unrealized = marketValue - cost;
+      const unrealizedRate = cost !== 0 ? unrealized / cost : null;
+      rows.push({
+        code: String(code),
+        quantity,
+        cost,
+        avg,
+        price: raw,
+        marketValue,
+        unrealized,
+        unrealizedRate,
+        priced: true,
+      });
+      totalPricedCost += cost;
+      totalMarketValue += marketValue;
+      pricedCount += 1;
+    } else {
+      rows.push({
+        code: String(code),
+        quantity,
+        cost,
+        avg,
+        price: null,
+        marketValue: null,
+        unrealized: null,
+        unrealizedRate: null,
+        priced: false,
+      });
+      unpricedCount += 1;
+    }
+  }
+
+  // 評価額（価格欠損は取得原価）で降順。取得総額の感覚に近い並びにする。
+  rows.sort((a, b) => (b.marketValue ?? b.cost) - (a.marketValue ?? a.cost));
+
+  const totalUnrealized = totalMarketValue - totalPricedCost;
+  const total = {
+    cost: totalPricedCost,
+    marketValue: totalMarketValue,
+    unrealized: totalUnrealized,
+    unrealizedRate: totalPricedCost !== 0 ? totalUnrealized / totalPricedCost : null,
+    pricedCount,
+    unpricedCount,
+    pricedAll: unpricedCount === 0,
+  };
+
+  return { rows, total };
+}
+
 // 約定日順に実現損益を積み上げた累積系列（グラフ用）
 // 戻り値: [{ date, cum }]
 export function cumulative(records) {
