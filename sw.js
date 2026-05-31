@@ -1,6 +1,6 @@
 // Service Worker: アプリシェルをキャッシュしオフライン閲覧を可能にする。
 // データの正は Google Drive。ここがキャッシュするのはアプリのコードと銘柄リストのみ。
-const CACHE = "tradebook-shell-v10";
+const CACHE = "tradebook-shell-v11";
 const ASSETS = [
   "./index.html",
   "./css/style.css",
@@ -9,10 +9,12 @@ const ASSETS = [
   "./js/store.js",
   "./js/drive.js",
   "./js/stocks.js",
+  "./js/prices.js",
   "./js/charts.js",
   "./js/config.js",
   "./js/vendor/chart.umd.min.js",
   "./data/stocks.json",
+  "./data/latest_prices.json",
   "./manifest.webmanifest",
 ];
 
@@ -32,6 +34,20 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   // Google API / 認証はキャッシュせず常にネットワーク
   if (url.hostname.endsWith("googleapis.com") || url.hostname.endsWith("google.com")) {
+    return;
+  }
+  // 最新終値はネットワーク優先（オンライン時は最新を取得、失敗時はキャッシュへフォールバック）。
+  // 日次で更新されるため、SW再インストールを待たずに新しい価格を反映できる。
+  if (url.pathname.endsWith("/data/latest_prices.json")) {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+          return res;
+        })
+        .catch(() => caches.match(e.request))
+    );
     return;
   }
   // アプリシェルはキャッシュ優先

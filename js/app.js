@@ -8,7 +8,8 @@ import {
   saveMaster,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
-import { calcRealized, aggregate, calcKpis, withMatsuiFees } from "./pnl.js";
+import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
+import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized } from "./pnl.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 
@@ -33,6 +34,12 @@ function formatYen(n, sign = true) {
 }
 function gainLossClass(n) {
   return n > 0 ? "gain" : n < 0 ? "loss" : "";
+}
+// 含み損益率を符号付き％で表示（+12.3% / −4.5%）
+function formatPct(rate) {
+  const v = rate * 100;
+  const s = v > 0 ? "+" : v < 0 ? "−" : "±";
+  return s + Math.abs(v).toFixed(1) + "%";
 }
 // innerHTML へ差し込む前にユーザー由来テキストをエスケープする（将来のメモ欄等に備える）
 function esc(s) {
@@ -59,33 +66,73 @@ function renderAll() {
   renderList(trades, records);
 }
 
-// 保有銘柄カード: 銘柄 / 保有数 / 平均取得単価（取得総額の大きい順）。
+// 保有銘柄カード: 銘柄 / 保有数 / 平均取得単価 / 現在値 / 評価額 / 含み損益（評価額の大きい順）。
 // holdings は calcRealized が返す { code: { quantity, cost } }。
+// 最新終値（latest_prices.json）があれば含み損益（未実現）を併記し、合計と基準日も表示する。
 function renderHoldings(holdings) {
-  const rows = Object.entries(holdings)
-    .filter(([, h]) => h.quantity > 0)
-    .map(([code, h]) => ({ code, quantity: h.quantity, cost: h.cost, avg: h.cost / h.quantity }))
-    .sort((a, b) => b.cost - a.cost); // 取得総額の大きい順
+  const { rows, total } = calcUnrealized(holdings, getPriceMap());
 
   const thead = $("holdings-table").querySelector("thead");
   const tbody = $("holdings-table").querySelector("tbody");
-  thead.innerHTML = `<tr><th>銘柄</th><th>保有数</th><th>平均取得単価</th></tr>`;
+  const note = $("holdings-note");
+  const date = getPriceDate();
+
+  // 基準日の注記（価格未取得なら従来の3列にフォールバック）
+  const hasPrices = date && rows.some((r) => r.priced);
+  thead.innerHTML = hasPrices
+    ? `<tr><th>銘柄</th><th>保有数</th><th>平均取得単価</th><th>現在値</th><th>評価額</th><th>含み損益</th></tr>`
+    : `<tr><th>銘柄</th><th>保有数</th><th>平均取得単価</th></tr>`;
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="3" class="table-empty">保有中の銘柄はありません</td></tr>`;
+    const cols = hasPrices ? 6 : 3;
+    tbody.innerHTML = `<tr><td colspan="${cols}" class="table-empty">保有中の銘柄はありません</td></tr>`;
+    if (note) note.textContent = "";
     return;
   }
+
+  const yen = (n) => Math.round(n).toLocaleString("ja-JP");
   tbody.innerHTML = rows
     .map((r) => {
       const name = esc(codeToName(r.code) || "（名称未登録）");
-      const avg = Math.round(r.avg).toLocaleString("ja-JP");
+      const codeTag = `<span style="color:#b0b0b5;font-size:11px">${esc(r.code)}</span>`;
+      const avg = yen(r.avg);
+      const qty = `${r.quantity.toLocaleString("ja-JP")}株`;
+      if (!hasPrices) {
+        return `<tr><td>${name} ${codeTag}</td><td>${qty}</td><td>${avg}</td></tr>`;
+      }
+      if (!r.priced) {
+        // 価格欠損銘柄は現在値以降を「—」
+        return (
+          `<tr><td>${name} ${codeTag}</td><td>${qty}</td><td>${avg}</td>` +
+          `<td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr>`
+        );
+      }
+      const rate =
+        r.unrealizedRate === null ? "" : ` <span class="rate">(${formatPct(r.unrealizedRate)})</span>`;
       return (
-        `<tr><td>${name} <span style="color:#b0b0b5;font-size:11px">${esc(r.code)}</span></td>` +
-        `<td>${r.quantity.toLocaleString("ja-JP")}株</td>` +
-        `<td>${avg}</td></tr>`
+        `<tr><td>${name} ${codeTag}</td><td>${qty}</td><td>${avg}</td>` +
+        `<td>${yen(r.price)}</td><td>${yen(r.marketValue)}</td>` +
+        `<td class="${gainLossClass(r.unrealized)}">${formatYen(r.unrealized)}${rate}</td></tr>`
       );
     })
     .join("");
+
+  // 合計行＋基準日の注記
+  if (note) {
+    if (!hasPrices) {
+      note.textContent = "最新株価が取得できませんでした（含み損益は非表示）。";
+    } else {
+      const totalRate =
+        total.unrealizedRate === null ? "" : `（${formatPct(total.unrealizedRate)}）`;
+      const cls = gainLossClass(total.unrealized);
+      const excluded = total.pricedAll
+        ? ""
+        : ` ／ ${total.unpricedCount}銘柄は株価未取得のため合計から除外`;
+      note.innerHTML =
+        `${esc(date)}終値ベースの含み損益（未実現）：評価額 ${yen(total.marketValue)}円 ／ ` +
+        `合計 <span class="${cls}">${formatYen(total.unrealized)}</span>円${totalRate}${esc(excluded)}`;
+    }
+  }
 }
 
 // calcRealized の警告（保有超過売却など）をバナー表示する
@@ -529,7 +576,7 @@ function wireEvents() {
 
 // ---------- 起動 ----------
 async function init() {
-  await loadStocks();
+  await Promise.all([loadStocks(), loadPrices()]);
   store.loadCache(); // 直近のキャッシュを表示（オフライン/未サインインでも閲覧可）
   wireEvents();
   renderAll();

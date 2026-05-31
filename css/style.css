@@ -81,6 +81,11 @@ td { text-align: right; padding: 10px 4px; border-bottom: 1px solid #f4f4f6; fon
 td:first-child { text-align: left; font-weight: 600; }
 tr:last-child td { border-bottom: 0; }
 .table-empty { text-align: center; color: #b0b0b5; padding: 18px 0; font-size: 13px; }
+/* 横スクロール（保有銘柄カードの含み損益で列数が多い場合） */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll table { margin-top: 14px; }
+td.muted { color: #b0b0b5; }
+.rate { color: #8a8a8e; font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* グラフ */
 .chart-wrap { position: relative; height: 180px; }
