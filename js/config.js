@@ -2,7 +2,7 @@
 // 取得手順は README.md「初期セットアップ」を参照。
 export const CONFIG = {
   // Google Cloud で発行した OAuth 2.0 クライアントID（ウェブアプリケーション）
-  GOOGLE_CLIENT_ID: "PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE",
+  GOOGLE_CLIENT_ID: "611264947646-o65h7kftsbcqu8hcrilemfpa42in0gk1.apps.googleusercontent.com",
 
   // Drive上のマスターファイル名（通常変更不要）
   MASTER_FILENAME: "TradeBook_master.json",
