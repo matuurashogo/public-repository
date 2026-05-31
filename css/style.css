@@ -150,6 +150,7 @@ tr:last-child td { border-bottom: 0; }
 .side-toggle button.active[data-side="売"] { background: #ffeaea; color: var(--loss); border-color: #ffc4c4; }
 /* 口座区分トグル */
 .field-label { font-size: 12px; color: #6a6a6e; font-weight: 600; }
+.field-hint { font-size: 11px; color: #8a8a8e; line-height: 1.5; margin-top: -4px; }
 .acct-toggle { display: flex; gap: 8px; }
 .acct-toggle button { flex: 1; padding: 11px; border: 1px solid #d8d8dd; border-radius: 10px; background: #fafafa;
   font-size: 14px; font-weight: 700; color: #6a6a6e; cursor: pointer; }
