@@ -11,9 +11,11 @@ export function estimateTax(grossProfit) {
 }
 
 // 取引配列から実現損益レコードを計算する（平均法）。
-// trades: [{ id, date, code, side("買"/"売"), quantity, price }]
+// trades: [{ id, date, code, side("買"/"売"), quantity, price, fee?, account? }]
+//   fee: 手数料（任意・デフォルト0）。買は取得原価に加算、売は売却額から控除。
+//   account: "特定" | "NISA"（任意・デフォルト"特定"）。
 // 戻り値: { records, holdings, warnings }
-//   records: 売却ごとの実現損益 [{ date, code, quantity, sellPrice, avgCost, pnl }]
+//   records: 売却ごとの実現損益 [{ date, code, quantity, sellPrice, avgCost, pnl, account }]
 //   holdings: 銘柄ごとの残高 { code: { quantity, cost } }
 //   warnings: 警告メッセージ配列
 export function calcRealized(trades) {
@@ -36,12 +38,13 @@ export function calcRealized(trades) {
     const code = String(tr.code);
     const qty = Number(tr.quantity);
     const price = Number(tr.price);
+    const fee = Number(tr.fee) || 0; // 手数料（未設定は0）
     if (!holdings[code]) holdings[code] = { quantity: 0, cost: 0 };
     const h = holdings[code];
 
     if (tr.side === "買") {
       h.quantity += qty;
-      h.cost += qty * price; // 手数料はMVPでは0円扱い
+      h.cost += qty * price + fee; // 取得原価に手数料を加算
     } else if (tr.side === "売") {
       let sellQty = qty;
       if (sellQty > h.quantity) {
@@ -52,7 +55,8 @@ export function calcRealized(trades) {
       }
       if (sellQty > 0) {
         const avgCost = h.cost / h.quantity; // 平均取得単価
-        const pnl = Math.round(price * sellQty - avgCost * sellQty);
+        // 売却額から手数料を控除して実現損益を算出
+        const pnl = Math.round(price * sellQty - avgCost * sellQty - fee);
         records.push({
           tradeId: tr.id,
           date: tr.date,
@@ -61,6 +65,7 @@ export function calcRealized(trades) {
           sellPrice: price,
           avgCost,
           pnl,
+          account: tr.account || "特定",
         });
         h.cost -= avgCost * sellQty;
         h.quantity -= sellQty;
@@ -74,22 +79,31 @@ export function calcRealized(trades) {
 
 // 実現損益レコードを軸で集計する。
 // axis: "year" | "month" | "code"
-// 戻り値: [{ key, gross, tax, net }]（key昇順。year/monthは降順が見やすいので呼び出し側で調整可）
+// 戻り値: [{ key, gross, taxable, tax, net }]
+//   gross   : その軸の実現損益合計（全口座）
+//   taxable : 特定口座のみの合計（NISAは非課税のため除外）
+//   tax     : taxable に対する概算税（年単位のネットで見たときの目安）
+//   net     : gross - tax
+// 注意: 申告分離課税は本来「年単位・全銘柄通算後のネット」にかかる。月別/銘柄別の
+//        tax はあくまで単独試算であり、実際の納税額ではない（呼び出し側で扱いを分ける）。
 export function aggregate(records, axis, nameResolver) {
-  const buckets = new Map(); // key -> gross
+  const buckets = new Map(); // key -> { gross, taxable }
   for (const r of records) {
     let key;
     if (axis === "year") key = r.date.slice(0, 4);
     else if (axis === "month") key = r.date.slice(0, 7); // YYYY-MM
     else if (axis === "code") key = r.code;
     else throw new Error(`unknown axis: ${axis}`);
-    buckets.set(key, (buckets.get(key) || 0) + r.pnl);
+    const b = buckets.get(key) || { gross: 0, taxable: 0 };
+    b.gross += r.pnl;
+    if ((r.account || "特定") === "特定") b.taxable += r.pnl; // NISAは課税対象外
+    buckets.set(key, b);
   }
 
   const rows = [];
-  for (const [key, gross] of buckets.entries()) {
-    const tax = estimateTax(gross);
-    const row = { key, gross, tax, net: gross - tax };
+  for (const [key, b] of buckets.entries()) {
+    const tax = estimateTax(b.taxable);
+    const row = { key, gross: b.gross, taxable: b.taxable, tax, net: b.gross - tax };
     if (axis === "code" && typeof nameResolver === "function") {
       row.name = nameResolver(key);
     }

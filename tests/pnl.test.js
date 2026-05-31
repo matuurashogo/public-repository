@@ -93,6 +93,35 @@ test("保有を超える売却は警告し保有分のみ計算", () => {
   assert.equal(records[0].pnl, 10000); // (1200-1000)*50
 });
 
+test("手数料: 買は取得原価に加算、売は売却額から控除", () => {
+  const trades = [
+    { id: "1", date: "2026-03-10", code: "7203", side: "買", quantity: 100, price: 1000, fee: 500 },
+    { id: "2", date: "2026-03-25", code: "7203", side: "売", quantity: 100, price: 1200, fee: 300 },
+  ];
+  const { records } = calcRealized(trades);
+  // 取得原価 = 100*1000 + 500 = 100500、平均取得単価 = 1005
+  assert.equal(records[0].avgCost, 1005);
+  // pnl = 1200*100 - 1005*100 - 300(売手数料) = 120000 - 100500 - 300 = 19200
+  assert.equal(records[0].pnl, 19200);
+});
+
+test("NISA口座は課税対象から除外される（gross は含むが tax は0）", () => {
+  const trades = [
+    // NISA: +30,000（非課税）
+    { id: "1", date: "2026-02-01", code: "7203", side: "買", quantity: 100, price: 1000, account: "NISA" },
+    { id: "2", date: "2026-02-10", code: "7203", side: "売", quantity: 100, price: 1300, account: "NISA" },
+    // 特定: +20,000（課税）
+    { id: "3", date: "2026-02-01", code: "6758", side: "買", quantity: 100, price: 2000, account: "特定" },
+    { id: "4", date: "2026-02-10", code: "6758", side: "売", quantity: 100, price: 2200, account: "特定" },
+  ];
+  const { records } = calcRealized(trades);
+  const year = aggregate(records, "year");
+  assert.equal(year[0].gross, 50000); // 30000(NISA) + 20000(特定)
+  assert.equal(year[0].taxable, 20000); // 特定のみ
+  assert.equal(year[0].tax, estimateTax(20000));
+  assert.equal(year[0].net, 50000 - estimateTax(20000));
+});
+
 test("累積損益は約定日順の積み上げ", () => {
   const records = [
     { date: "2026-05-20", code: "7011", quantity: 100, sellPrice: 2482, avgCost: 2000, pnl: 48200 },

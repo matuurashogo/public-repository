@@ -9,6 +9,7 @@ const SCOPE = "https://www.googleapis.com/auth/drive.file";
 let _tokenClient = null;
 let _accessToken = null;
 let _fileId = null; // マスターファイルのDrive上のID（判明後にキャッシュ）
+let _knownModifiedTime = null; // 最後に読み書きしたサーバ側の modifiedTime（衝突検出用）
 
 // 設定済みか（プレースホルダのままでないか）
 export function isConfigured() {
@@ -113,20 +114,33 @@ function authHeaders() {
   return { Authorization: `Bearer ${_accessToken}` };
 }
 
-// マスターファイルのIDを検索（無ければ null）
+// マスターファイルのIDを検索（無ければ null）。modifiedTime を更新日時として保持する。
+// 同名ファイルが複数ある場合（split-brain）は最終更新が最も新しいものを採用する。
 async function findMasterFileId() {
   const q = encodeURIComponent(
     `name='${CONFIG.MASTER_FILENAME}' and trashed=false`
   );
-  const url = `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)`;
+  const url =
+    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive` +
+    `&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime)`;
   const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Drive検索に失敗: ${res.status}`);
   const data = await res.json();
   if (data.files && data.files.length > 0) {
-    _fileId = data.files[0].id;
+    _fileId = data.files[0].id; // orderBy で先頭が最新
+    _knownModifiedTime = data.files[0].modifiedTime || null;
     return _fileId;
   }
   return null;
+}
+
+// 現在のサーバ側 modifiedTime を取得する（保存前の衝突検出用）。
+async function fetchModifiedTime(id) {
+  const url = `https://www.googleapis.com/drive/v3/files/${id}?fields=modifiedTime`;
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`更新時刻の取得に失敗: ${res.status}`);
+  const data = await res.json();
+  return data.modifiedTime || null;
 }
 
 // マスターを読み込む。無ければ null を返す（呼び出し側で空マスターを使う）
@@ -140,20 +154,41 @@ export async function loadMaster() {
   return await res.json();
 }
 
+// 保存時にサーバ側が新しくなっていたら投げるエラー（呼び出し側でマージ＋再保存する）。
+export class ConflictError extends Error {
+  constructor(serverModifiedTime) {
+    super("サーバ側のデータが更新されています（衝突）。");
+    this.name = "ConflictError";
+    this.code = "CONFLICT";
+    this.serverModifiedTime = serverModifiedTime;
+  }
+}
+
 // マスターを書き戻す（全体上書き）。初回はファイルを新規作成する。
+// 既存ファイル更新時は、保存直前にサーバ側 modifiedTime を確認し、最後に読んだ時刻と
+// 異なれば ConflictError を投げて上書きを止める（last-write-wins によるデータ消失防止）。
 export async function saveMaster(master) {
   if (!_accessToken) throw new Error("未サインインです。");
   const body = JSON.stringify(master);
 
   if (_fileId) {
-    // 既存ファイルを更新（media のみ）
-    const url = `https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media`;
+    // 衝突検出: 別端末がこの間に保存していないか確認
+    if (_knownModifiedTime) {
+      const current = await fetchModifiedTime(_fileId);
+      if (current && current !== _knownModifiedTime) {
+        throw new ConflictError(current);
+      }
+    }
+    // 既存ファイルを更新（media）。更新後の modifiedTime を取得して保持する
+    const url = `https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media&fields=id,modifiedTime`;
     const res = await fetch(url, {
       method: "PATCH",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
       body,
     });
     if (!res.ok) throw new Error(`マスター更新に失敗: ${res.status}`);
+    const data = await res.json();
+    _knownModifiedTime = data.modifiedTime || _knownModifiedTime;
     return;
   }
 
@@ -170,7 +205,7 @@ export async function saveMaster(master) {
     `\r\n--${boundary}--`;
 
   const url =
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id";
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime";
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -182,4 +217,5 @@ export async function saveMaster(master) {
   if (!res.ok) throw new Error(`マスター作成に失敗: ${res.status}`);
   const data = await res.json();
   _fileId = data.id;
+  _knownModifiedTime = data.modifiedTime || null;
 }

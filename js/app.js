@@ -1,5 +1,5 @@
 // アプリ統合: 起動フロー・保存フロー・描画・イベント
-import { Store } from "./store.js";
+import { Store, mergeMasters } from "./store.js";
 import {
   isConfigured,
   isSignedIn,
@@ -15,6 +15,7 @@ const store = new Store();
 let axis = "month"; // year | month | code
 let editingId = null;
 let currentSide = "買";
+let currentAccount = "特定"; // 特定 | NISA
 
 const $ = (id) => document.getElementById(id);
 
@@ -26,6 +27,12 @@ function formatYen(n, sign = true) {
 function gainLossClass(n) {
   return n > 0 ? "gain" : n < 0 ? "loss" : "";
 }
+// innerHTML へ差し込む前にユーザー由来テキストをエスケープする（将来のメモ欄等に備える）
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+  );
+}
 
 function setSync(state, text) {
   const el = $("sync");
@@ -35,11 +42,26 @@ function setSync(state, text) {
 
 // ---------- 描画 ----------
 function renderAll() {
-  const { records } = calcRealized(store.getTrades());
+  const { records, warnings } = calcRealized(store.getTrades());
+  renderWarnings(warnings);
   renderSummary(records);
   renderKpis();
   renderCumulative($("cum-chart"), records);
   renderList(store.getTrades(), records);
+}
+
+// calcRealized の警告（保有超過売却など）をバナー表示する
+function renderWarnings(warnings) {
+  const el = $("warn-banner");
+  if (!warnings || warnings.length === 0) {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML =
+    `<div class="warn-title">⚠ 入力の確認（${warnings.length}件）</div>` +
+    warnings.map((w) => `<div class="warn-item">${esc(w)}</div>`).join("");
+  el.classList.remove("hidden");
 }
 
 // ---------- トレード成績（KPI）----------
@@ -115,22 +137,39 @@ function renderSummary(records) {
   $("hero-tax").textContent = hero.tax > 0 ? "−" + hero.tax.toLocaleString("ja-JP") : "0";
 
   // 集計表
+  // 申告分離課税は年単位・全銘柄通算後のネットにかかるため、税額は「年」軸でのみ表示する。
+  // 月別・銘柄別は誤解を避けて税引前のみ表示する。
+  const isYear = axis === "year";
   const rows = aggregate(records, axis, codeToName);
   const thead = $("summary-table").querySelector("thead");
   const tbody = $("summary-table").querySelector("tbody");
+  const note = $("summary-note");
   const firstCol = axis === "code" ? "銘柄" : axis === "year" ? "年" : "月";
-  thead.innerHTML = `<tr><th>${firstCol}</th><th>税引前</th><th>概算税</th><th>税引後</th></tr>`;
+
+  thead.innerHTML = isYear
+    ? `<tr><th>${firstCol}</th><th>税引前</th><th>概算税</th><th>税引後</th></tr>`
+    : `<tr><th>${firstCol}</th><th>税引前</th></tr>`;
+
+  note.textContent = isYear
+    ? "概算税は特定口座の年間ネットに対する20.315%（NISA除外・損失の繰越控除は未考慮）。"
+    : "税額は年単位・全銘柄の損益通算後にかかるため、月別・銘柄別は税引前のみ表示しています。";
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="table-empty">売却の記録がありません</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${isYear ? 4 : 2}" class="table-empty">売却の記録がありません</td></tr>`;
     return;
   }
   tbody.innerHTML = rows
     .map((r) => {
       let label;
-      if (axis === "code") label = (r.name || r.key) + ` <span style="color:#b0b0b5;font-size:11px">${r.key}</span>`;
-      else if (axis === "year") label = r.key + "年";
-      else label = r.key.replace("-", "/");
+      if (axis === "code") label = `${esc(r.name || r.key)} <span style="color:#b0b0b5;font-size:11px">${esc(r.key)}</span>`;
+      else if (axis === "year") label = esc(r.key) + "年";
+      else label = esc(r.key.replace("-", "/"));
+      if (!isYear) {
+        return (
+          `<tr><td>${label}</td>` +
+          `<td class="${gainLossClass(r.gross)}">${formatYen(r.gross)}</td></tr>`
+        );
+      }
       return (
         `<tr><td>${label}</td>` +
         `<td class="${gainLossClass(r.gross)}">${formatYen(r.gross)}</td>` +
@@ -151,7 +190,7 @@ function renderList(trades, records) {
 
   list.innerHTML = sorted
     .map((t) => {
-      const name = codeToName(t.code) || "（名称未登録）";
+      const name = esc(codeToName(t.code) || "（名称未登録）");
       const isSell = t.side === "売";
       const pnl = pnlById[t.id];
       const right = isSell
@@ -160,14 +199,19 @@ function renderList(trades, records) {
             : `<span class="pnl-tag muted">—</span>`)
         : `<span class="pnl-tag muted">買付</span>`;
       const price = Number(t.price).toLocaleString("ja-JP");
+      const nisa = t.account === "NISA" ? `<span class="acct-tag">NISA</span>` : "";
+      const fee = Number(t.fee) > 0 ? ` ・ 手数料${Number(t.fee).toLocaleString("ja-JP")}` : "";
+      const label = `${name} ${t.code}`;
       return (
         `<div class="trade">` +
-        `<div class="left"><div class="name">${name}<span class="code">${t.code}</span></div>` +
-        `<div class="meta">${t.date.replace(/-/g, "/")} ・ ${t.quantity}株 @${price}</div></div>` +
+        `<div class="left"><div class="name">${name}<span class="code">${esc(t.code)}</span>${nisa}</div>` +
+        `<div class="meta">${esc(t.date.replace(/-/g, "/"))} ・ ${esc(t.quantity)}株 @${price}${fee}</div></div>` +
         `<div class="right">${right}` +
         `<span class="badge ${isSell ? "sell" : "buy"}">${t.side}</span>` +
-        `<span class="row-actions"><button data-edit="${t.id}">✏️</button>` +
-        `<button data-del="${t.id}">🗑</button></span></div></div>`
+        `<span class="row-actions">` +
+        `<button data-edit="${t.id}" aria-label="${esc(label)} を編集">✏️</button>` +
+        `<button data-del="${t.id}" aria-label="${esc(label)} を削除">🗑</button>` +
+        `</span></div></div>`
       );
     })
     .join("");
@@ -184,6 +228,23 @@ async function saveToDrive() {
     await saveMaster(store.getMaster());
     setSync("ok", "保存済み");
   } catch (e) {
+    if (e && e.code === "CONFLICT") {
+      // 別端末が先に保存していた → 取得してマージし、再保存する（消失を防ぐ）
+      try {
+        setSync("busy", "他端末の変更とマージ中…");
+        const remote = await loadMaster();
+        const merged = mergeMasters(store.getMaster(), remote);
+        store.setMaster(merged);
+        await saveMaster(merged);
+        renderAll();
+        setSync("ok", "マージして保存");
+        return;
+      } catch (e2) {
+        console.error(e2);
+        setSync("error", "マージに失敗");
+        return;
+      }
+    }
     console.error(e);
     setSync("error", "保存に失敗");
   }
@@ -192,9 +253,12 @@ async function saveToDrive() {
 async function syncFromDrive() {
   setSync("busy", "読込中…");
   try {
-    const master = await loadMaster();
-    if (master) {
-      store.setMaster(master);
+    const remote = await loadMaster();
+    if (remote) {
+      // ローカル（未サインイン中の追加・編集・削除を含む）とマージしてから採用・保存
+      const merged = mergeMasters(store.getMaster(), remote);
+      store.setMaster(merged);
+      await saveMaster(merged);
     } else {
       // Drive上に未作成 → 現在のローカル内容で新規作成
       await saveMaster(store.getMaster());
@@ -209,17 +273,26 @@ async function syncFromDrive() {
 }
 
 // ---------- フォーム ----------
+// ローカル日付(YYYY-MM-DD)。toISOString はUTC基準でJST早朝に前日へずれるため使わない。
+function todayLocalISO() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function openForm(trade) {
   editingId = trade ? trade.id : null;
   $("form-title").textContent = trade ? "取引を編集" : "取引を追加";
   $("form-submit").textContent = trade ? "更新する" : "追加する";
-  $("f-date").value = trade ? trade.date : new Date().toISOString().slice(0, 10);
+  $("f-date").value = trade ? trade.date : todayLocalISO();
   $("f-code").value = trade ? trade.code : "";
   $("f-qty").value = trade ? trade.quantity : "";
   $("f-price").value = trade ? trade.price : "";
+  $("f-fee").value = trade && Number(trade.fee) > 0 ? trade.fee : "";
   $("f-search").value = "";
   hideSuggest();
   setSide(trade ? trade.side : "買");
+  setAccount(trade ? trade.account || "特定" : "特定");
   updateNamePreview();
   $("form-card").hidden = false;
   $("add-toggle").hidden = true;
@@ -234,9 +307,19 @@ function closeForm() {
 function setSide(side) {
   currentSide = side;
   for (const b of $("f-side").querySelectorAll("button")) {
-    b.classList.toggle("active", b.dataset.side === side);
+    const on = b.dataset.side === side;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
   }
   updateHoldingsPicker();
+}
+function setAccount(acct) {
+  currentAccount = acct;
+  for (const b of $("f-account").querySelectorAll("button")) {
+    const on = b.dataset.acct === acct;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  }
 }
 function updateNamePreview() {
   const code = $("f-code").value.trim();
@@ -261,8 +344,8 @@ function renderSuggest(query) {
   list.innerHTML = items
     .map(
       (it) =>
-        `<li data-code="${it.code}"><span class="s-name">${it.name || "（名称未登録）"}</span>` +
-        `<span class="s-code">${it.code}</span></li>`
+        `<li data-code="${it.code}"><span class="s-name">${esc(it.name || "（名称未登録）")}</span>` +
+        `<span class="s-code">${esc(it.code)}</span></li>`
     )
     .join("");
   list.hidden = false;
@@ -298,11 +381,11 @@ function updateHoldingsPicker() {
   } else {
     listEl.innerHTML = holds
       .map((h) => {
-        const name = codeToName(h.code) || "（名称未登録）";
+        const name = esc(codeToName(h.code) || "（名称未登録）");
         const avg = Math.round(h.avgCost).toLocaleString("ja-JP");
         return (
           `<button type="button" class="hp-item" data-code="${h.code}" data-qty="${h.quantity}">` +
-          `<span class="hp-name">${name}<span class="hp-code">${h.code}</span></span>` +
+          `<span class="hp-name">${name}<span class="hp-code">${esc(h.code)}</span></span>` +
           `<span class="hp-qty">${h.quantity.toLocaleString("ja-JP")}株 ・ 平均${avg}</span></button>`
         );
       })
@@ -317,11 +400,12 @@ function onSubmit(ev) {
   const code = $("f-code").value.trim();
   const quantity = Number($("f-qty").value);
   const price = Number($("f-price").value);
-  if (!date || !/^\d{4}$/.test(code) || !(quantity > 0) || !(price >= 0)) {
-    alert("入力内容を確認してください（銘柄コードは4桁、数量は1以上）。");
+  const fee = Number($("f-fee").value) || 0;
+  if (!date || !/^\d{4}$/.test(code) || !(quantity > 0) || !(price >= 0) || fee < 0) {
+    alert("入力内容を確認してください（銘柄コードは4桁、数量は1以上、手数料は0以上）。");
     return;
   }
-  const trade = { date, code, side: currentSide, quantity, price };
+  const trade = { date, code, side: currentSide, quantity, price, fee, account: currentAccount };
   if (editingId) store.updateTrade(editingId, trade);
   else store.addTrade(trade);
   closeForm();
@@ -335,7 +419,10 @@ function wireEvents() {
     const btn = e.target.closest("button[data-axis]");
     if (!btn) return;
     axis = btn.dataset.axis;
-    for (const b of $("seg").querySelectorAll("button")) b.classList.toggle("active", b === btn);
+    for (const b of $("seg").querySelectorAll("button")) {
+      b.classList.toggle("active", b === btn);
+      b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+    }
     renderAll();
   });
 
@@ -346,6 +433,10 @@ function wireEvents() {
   $("f-side").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-side]");
     if (b) setSide(b.dataset.side);
+  });
+  $("f-account").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-acct]");
+    if (b) setAccount(b.dataset.acct);
   });
 
   // 銘柄サジェスト

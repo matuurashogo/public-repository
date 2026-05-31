@@ -23,13 +23,16 @@
     <p id="signin-note" class="signin-note"></p>
   </div>
 
+  <!-- 入力警告バナー（保有超過売却など） -->
+  <div id="warn-banner" class="warn-banner hidden" role="alert"></div>
+
   <!-- 損益サマリー -->
   <section class="card">
     <div class="card-title">損益サマリー</div>
-    <div class="seg" id="seg">
-      <button data-axis="year">年間</button>
-      <button data-axis="month" class="active">月間</button>
-      <button data-axis="code">銘柄別</button>
+    <div class="seg" id="seg" role="group" aria-label="集計軸の切り替え">
+      <button data-axis="year" aria-pressed="false">年間</button>
+      <button data-axis="month" class="active" aria-pressed="true">月間</button>
+      <button data-axis="code" aria-pressed="false">銘柄別</button>
     </div>
     <div class="summary-main">
       <div class="label" id="hero-label">税引後損益</div>
@@ -43,6 +46,7 @@
       <thead></thead>
       <tbody></tbody>
     </table>
+    <p id="summary-note" class="summary-note"></p>
   </section>
 
   <!-- トレード成績（KPI） -->
@@ -50,14 +54,14 @@
     <div class="card-title">トレード成績（KPI）<span class="card-sub">今年</span></div>
     <div id="kpi-grid" class="kpi-grid"></div>
     <div class="kpi-hist-label">損益分布</div>
-    <div class="chart-wrap hist-wrap"><canvas id="hist-chart"></canvas></div>
+    <div class="chart-wrap hist-wrap"><canvas id="hist-chart" role="img" aria-label="今年の売却ごとの実現損益の分布ヒストグラム"></canvas></div>
     <p id="kpi-empty" class="kpi-empty hidden">今年の売却がまだありません。売却を記録すると成績が表示されます。</p>
   </section>
 
   <!-- 累積損益グラフ -->
   <section class="card">
     <div class="card-title">累積損益の推移</div>
-    <div class="chart-wrap"><canvas id="cum-chart"></canvas></div>
+    <div class="chart-wrap"><canvas id="cum-chart" role="img" aria-label="実現損益の累積推移の折れ線グラフ"></canvas></div>
   </section>
 
   <!-- 取引追加 -->
@@ -86,6 +90,12 @@
       </div>
       <label>数量（株）<input type="number" id="f-qty" inputmode="numeric" min="1" step="1" placeholder="100" required /></label>
       <label>約定単価（円）<input type="number" id="f-price" inputmode="decimal" min="0" step="0.1" placeholder="2850" required /></label>
+      <span class="field-label">口座区分</span>
+      <div class="acct-toggle" id="f-account" role="group" aria-label="口座区分">
+        <button type="button" data-acct="特定" class="active" aria-pressed="true">特定</button>
+        <button type="button" data-acct="NISA" aria-pressed="false">NISA（非課税）</button>
+      </div>
+      <label>手数料（円・任意）<input type="number" id="f-fee" inputmode="decimal" min="0" step="1" placeholder="0" /></label>
       <div class="form-actions">
         <button type="button" id="form-cancel" class="btn-ghost">キャンセル</button>
         <button type="submit" id="form-submit" class="btn-primary">追加する</button>
