@@ -54,7 +54,7 @@ python TradeBook/tools/gen_stocks.py
 
 ### 銘柄名リストについて
 
-`data/stocks.json` は `JQuantsExtractor/data/subsector_master.jsonl` から生成した約2,200銘柄のコード→名称対応。網羅的ではないため、未登録コードは名称が空欄になります（記録・計算自体は可能）。将来 J-Quants の `listed_info`（全上場銘柄）が利用できる場合は `tools/gen_stocks.py` を差し替えて全銘柄化できます。
+`data/stocks.json` はコード→名称対応（約3,800銘柄）。主データは `JQuantsExtractor/data/subsector_master.jsonl`（約2,200銘柄）で、これに加えて兄弟ディレクトリに [`jquants-data`](https://github.com/matuurashogo/jquants-data) リポジトリがあれば、その `full/sector33_*.parquet` の `company` 列（ほぼ全上場銘柄の社名）から**主データに無い銘柄名のみ**を補完します（`pyarrow` 必須・任意依存。場所は環境変数 `JQUANTS_PARQUET_REPO` で指定可）。補完は追加のみで既存の名称は上書きしません。なお未収録コードは名称が空欄になります（記録・計算自体は可能）。
 
 ## スコープ外（次フェーズ）
 
