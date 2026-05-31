@@ -26,12 +26,15 @@ Google Drive と同期するには、自分用の OAuth クライアントID を
 
 1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを新規作成。
 2. 「APIとサービス」→「ライブラリ」で **Google Drive API** を有効化。
-3. 「OAuth同意画面」→ ユーザータイプ「外部」→ アプリ名・連絡先を入力。スコープに `.../auth/drive.file` を追加し、**テストユーザー**に自分のGoogleアカウントを登録。
+3. 「OAuth同意画面（Google Auth Platform）」→ ユーザータイプ「外部」→ アプリ名・連絡先を入力。スコープに `.../auth/drive.file` を追加。
 4. 「認証情報」→「認証情報を作成」→「OAuth クライアントID」→ アプリケーションの種類「**ウェブアプリケーション**」。
 5. 「**承認済みの JavaScript 生成元**」に、アプリを開くURLのオリジンを追加：
    - GitHub Pages: `https://<ユーザー名>.github.io`
    - ローカル確認用: `http://localhost:8765`
 6. 発行された **クライアントID** を `js/config.js` の `GOOGLE_CLIENT_ID` に貼り付け。
+7. **OAuth同意画面を「本番環境」に切り替える**（推奨）。Google Auth Platform →「対象（Audience）」→ **「アプリを公開」/「本番環境に移行」** をクリック。
+   - `drive.file` 単独スコープは sensitive/restricted ではないため、**審査不要のまま公開でき、サインイン時の警告画面が出なくなります**（「確認が必要」と表示されなければ完了）。
+   - テストモードのままだと **7日でログインが切れる**ため、本番公開を推奨します。テストユーザー登録で運用する場合は、自分のGoogleアカウントを「テストユーザー」に追加してください（7日制約あり）。
 
 設定後、アプリ上部の「Googleでサインインして同期」からサインインすると、Drive上に `TradeBook_master.json` を作成・同期します（スコープ `drive.file` のため、このアプリが作ったファイル以外にはアクセスしません）。
 
