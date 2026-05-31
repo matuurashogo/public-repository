@@ -4,7 +4,6 @@ import {
   isConfigured,
   isSignedIn,
   signIn,
-  signInSilent,
   loadMaster,
   saveMaster,
 } from "./drive.js";
@@ -257,28 +256,18 @@ async function init() {
   wireEvents();
   renderAll();
   if (isConfigured()) {
-    $("signin-note").textContent = "サインインすると Google Drive のマスターと同期します。";
+    $("signin-note").textContent =
+      "いまはこの端末に保存したデータを表示しています。上のボタンをタップすると Google Drive の最新と同期します。";
   } else {
     $("signin-note").textContent =
       "現在はローカル保存で動作中。クラウド同期を使うには README の手順で設定してください。";
   }
-  setSync("", "未サインイン");
+  // iOS Safari/PWA では起動時のサイレント認証（ユーザー操作なしのトークン取得）が
+  // 自動ポップアップ抑止＋ITPにより成立しないため行わない。サインインはボタンのタップ起点とする。
+  setSync("", isConfigured() ? "ローカル表示中（タップで同期）" : "未サインイン");
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("SW登録失敗:", e));
-  }
-
-  // 起動時のサイレント再認証: 前回サインイン済みなら UI を出さずに復帰し、
-  // Drive の最新マスターを取り込む。失敗時はローカル表示のまま手動サインインを促す。
-  if (isConfigured()) {
-    setSync("busy", "同期を確認中…");
-    try {
-      await signInSilent();
-      await syncFromDrive();
-    } catch (e) {
-      console.info("サイレント認証は行えませんでした（手動サインインが必要）:", e?.message || e);
-      setSync("", "未サインイン");
-    }
   }
 }
 
