@@ -8,8 +8,8 @@ import {
   saveMaster,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
-import { calcRealized, aggregate } from "./pnl.js";
-import { renderCumulative } from "./charts.js";
+import { calcRealized, aggregate, calcKpis } from "./pnl.js";
+import { renderCumulative, renderHistogram } from "./charts.js";
 
 const store = new Store();
 let axis = "month"; // year | month | code
@@ -37,8 +37,67 @@ function setSync(state, text) {
 function renderAll() {
   const { records } = calcRealized(store.getTrades());
   renderSummary(records);
+  renderKpis();
   renderCumulative($("cum-chart"), records);
   renderList(store.getTrades(), records);
+}
+
+// ---------- トレード成績（KPI）----------
+function renderKpis() {
+  const thisYear = String(new Date().getFullYear());
+  const k = calcKpis(store.getTrades(), thisYear);
+  const empty = k.sellCount === 0;
+  $("kpi-empty").classList.toggle("hidden", !empty);
+
+  // 表示ヘルパー
+  const pct = (v) => (v === null ? "—" : (v * 100).toFixed(0) + "%");
+  const x = (v) => (v === null ? "—" : v.toFixed(2) + "倍");
+  const yen = (v) => (v === null ? "—" : formatYen(v));
+  const days = (v) => (v === null ? "—" : v.toFixed(1) + "日");
+
+  // 平均利益/平均損失（2値を1セルに）
+  const avgWinLoss =
+    k.avgWin === null && k.avgLoss === null
+      ? "—"
+      : `<span class="gain">${k.avgWin === null ? "—" : formatYen(k.avgWin)}</span>` +
+        ` / <span class="loss">${k.avgLoss === null ? "—" : formatYen(k.avgLoss)}</span>`;
+
+  // 平均保有期間（全体／勝ち／負け）。負≫勝なら塩漬けサイン
+  const shioduke =
+    k.avgHoldDaysWin !== null &&
+    k.avgHoldDaysLoss !== null &&
+    k.avgHoldDaysLoss > k.avgHoldDaysWin * 1.5;
+  const holdSub =
+    k.avgHoldDaysWin === null && k.avgHoldDaysLoss === null
+      ? ""
+      : `<span class="kpi-hold ${shioduke ? "warn" : ""}">勝 ${days(k.avgHoldDaysWin)} / 負 ${days(k.avgHoldDaysLoss)}${shioduke ? " ⚠塩漬け傾向" : ""}</span>`;
+
+  // 並び順は CSS の .kpi-cell:nth-child(3) 全幅指定と対応（空セルを作らない配置）
+  const cells = [
+    { label: "勝率", value: pct(k.winRate), sub: `${k.winningCount}勝 ${k.losingCount}敗` },
+    { label: "期待値 / 売却", value: yen(k.expectancy), cls: gainLossClass(k.expectancy || 0) },
+    { label: "平均利益 / 平均損失", value: avgWinLoss, raw: true },
+    { label: "損益レシオ", value: x(k.payoffRatio) },
+    { label: "最大ドローダウン", value: k.maxDrawdown > 0 ? "−" + k.maxDrawdown.toLocaleString("ja-JP") : "±0", cls: k.maxDrawdown > 0 ? "loss" : "" },
+    { label: "売却回数（買付）", value: `${k.sellCount}回`, sub: `買付 ${k.buyCount}回` },
+    { label: "平均保有期間", value: days(k.avgHoldDays), subHtml: holdSub },
+  ];
+
+  $("kpi-grid").innerHTML = cells
+    .map((c) => {
+      const val = c.raw
+        ? `<div class="kpi-value">${c.value}</div>`
+        : `<div class="kpi-value ${c.cls || ""}">${c.value}</div>`;
+      const sub = c.subHtml
+        ? `<div class="kpi-sub">${c.subHtml}</div>`
+        : c.sub
+          ? `<div class="kpi-sub">${c.sub}</div>`
+          : "";
+      return `<div class="kpi-cell"><div class="kpi-label">${c.label}</div>${val}${sub}</div>`;
+    })
+    .join("");
+
+  renderHistogram($("hist-chart"), k.pnls);
 }
 
 function renderSummary(records) {
