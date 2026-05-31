@@ -1,8 +1,48 @@
 // 損益計算ロジック（平均法・税金準拠）
 // 副作用のない純粋関数のみ。ブラウザ(import)・Node(node:test)双方から利用する。
 
+import { MATSUI_BOX_RATE } from "./config.js";
+
 // 譲渡益課税の概算税率: 所得税15% + 復興特別所得税0.315% + 住民税5%
 export const TAX_RATE = 0.20315;
+
+// 松井証券のボックスレート: 1日の約定代金合計 totalAmount から手数料を算出する。
+// 〜freeUntil は0円、それを超えると stepAmount ごとに stepFee、上限 capFee。
+export function matsuiBoxRate(totalAmount, rate = MATSUI_BOX_RATE) {
+  const { freeUntil, stepAmount, stepFee, capFee } = rate;
+  if (totalAmount <= freeUntil) return 0;
+  const steps = Math.ceil(totalAmount / stepAmount); // 〜100万=1段, 〜200万=2段…
+  return Math.min(steps * stepFee, capFee);
+}
+
+// 各取引に「松井ボックスレートで自動算出した手数料」を付与した新しい配列を返す。
+// 仕様: 1日の特定口座の約定代金合計でボックスレートを決め、その日の各約定へ
+//       約定代金で按分する（端数は最後の約定で吸収して合計を一致させる）。
+//       NISA等は別体系のため0円扱い。calcRealized が買=原価加算・売=売却額控除で消費する。
+export function withMatsuiFees(trades, rate = MATSUI_BOX_RATE) {
+  const byDay = new Map(); // date -> { total, items: [{ idx, amount }] }
+  trades.forEach((t, idx) => {
+    if ((t.account || "特定") !== "特定") return; // NISA等は無料扱い
+    const amount = Number(t.price) * Number(t.quantity);
+    const d = byDay.get(t.date) || { total: 0, items: [] };
+    d.total += amount;
+    d.items.push({ idx, amount });
+    byDay.set(t.date, d);
+  });
+
+  const fees = new Array(trades.length).fill(0);
+  for (const { total, items } of byDay.values()) {
+    const fee = matsuiBoxRate(total, rate);
+    if (fee === 0 || total === 0) continue;
+    let allocated = 0;
+    items.forEach((it, i) => {
+      const f = i === items.length - 1 ? fee - allocated : Math.round(fee * (it.amount / total));
+      allocated += i === items.length - 1 ? 0 : f;
+      fees[it.idx] = f;
+    });
+  }
+  return trades.map((t, idx) => ({ ...t, fee: fees[idx] }));
+}
 
 // 概算税額（純利益がプラスのときのみ課税。損失は0）
 export function estimateTax(grossProfit) {

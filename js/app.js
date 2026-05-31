@@ -8,7 +8,8 @@ import {
   saveMaster,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
-import { calcRealized, aggregate, calcKpis } from "./pnl.js";
+import { calcRealized, aggregate, calcKpis, withMatsuiFees } from "./pnl.js";
+import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 
 const store = new Store();
@@ -18,6 +19,12 @@ let currentSide = "買";
 let currentAccount = "特定"; // 特定 | NISA
 
 const $ = (id) => document.getElementById(id);
+
+// 計算・表示に使う取引（松井ボックスレートの手数料を自動付与したもの）。
+// 1日の約定代金合計から算出するため、必ずこの単一経路を通す。
+function tradesForCalc() {
+  return withMatsuiFees(store.getTrades(), MATSUI_BOX_RATE);
+}
 
 // ---------- 表示ユーティリティ ----------
 function formatYen(n, sign = true) {
@@ -42,12 +49,13 @@ function setSync(state, text) {
 
 // ---------- 描画 ----------
 function renderAll() {
-  const { records, warnings } = calcRealized(store.getTrades());
+  const trades = tradesForCalc();
+  const { records, warnings } = calcRealized(trades);
   renderWarnings(warnings);
   renderSummary(records);
   renderKpis();
   renderCumulative($("cum-chart"), records);
-  renderList(store.getTrades(), records);
+  renderList(trades, records);
 }
 
 // calcRealized の警告（保有超過売却など）をバナー表示する
@@ -67,7 +75,7 @@ function renderWarnings(warnings) {
 // ---------- トレード成績（KPI）----------
 function renderKpis() {
   const thisYear = String(new Date().getFullYear());
-  const k = calcKpis(store.getTrades(), thisYear);
+  const k = calcKpis(tradesForCalc(), thisYear);
   const empty = k.sellCount === 0;
   $("kpi-empty").classList.toggle("hidden", !empty);
 
@@ -288,7 +296,6 @@ function openForm(trade) {
   $("f-code").value = trade ? trade.code : "";
   $("f-qty").value = trade ? trade.quantity : "";
   $("f-price").value = trade ? trade.price : "";
-  $("f-fee").value = trade && Number(trade.fee) > 0 ? trade.fee : "";
   $("f-search").value = "";
   hideSuggest();
   setSide(trade ? trade.side : "買");
@@ -361,7 +368,7 @@ function selectStock(code) {
 
 // ---------- 保有から売却 ----------
 function currentHoldings() {
-  const { holdings } = calcRealized(store.getTrades());
+  const { holdings } = calcRealized(tradesForCalc());
   return Object.entries(holdings)
     .filter(([, h]) => h.quantity > 0)
     .map(([code, h]) => ({ code, quantity: h.quantity, avgCost: h.cost / h.quantity }));
@@ -400,12 +407,12 @@ function onSubmit(ev) {
   const code = $("f-code").value.trim();
   const quantity = Number($("f-qty").value);
   const price = Number($("f-price").value);
-  const fee = Number($("f-fee").value) || 0;
-  if (!date || !/^\d{4}$/.test(code) || !(quantity > 0) || !(price >= 0) || fee < 0) {
-    alert("入力内容を確認してください（銘柄コードは4桁、数量は1以上、手数料は0以上）。");
+  if (!date || !/^\d{4}$/.test(code) || !(quantity > 0) || !(price >= 0)) {
+    alert("入力内容を確認してください（銘柄コードは4桁、数量は1以上）。");
     return;
   }
-  const trade = { date, code, side: currentSide, quantity, price, fee, account: currentAccount };
+  // 手数料は松井ボックスレートで自動算出するため、ここでは保持しない
+  const trade = { date, code, side: currentSide, quantity, price, account: currentAccount };
   if (editingId) store.updateTrade(editingId, trade);
   else store.addTrade(trade);
   closeForm();
