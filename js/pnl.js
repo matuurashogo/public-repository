@@ -116,3 +116,124 @@ export function cumulative(records) {
     return { date: r.date, cum };
   });
 }
+
+// 2つの ISO 日付文字列(YYYY-MM-DD)間の実日数を返す。
+function daysBetween(fromISO, toISO) {
+  const a = new Date(fromISO + "T00:00:00");
+  const b = new Date(toISO + "T00:00:00");
+  return Math.round((b - a) / 86400000);
+}
+
+// FIFO で買いロットと売りを突き合わせ、売却(tradeId)ごとの株数加重の
+// 平均保有日数（実日数）を返す。損益は平均法だが保有期間は日数定義が
+// 自然な FIFO で算出する（設計ドキュメント参照）。
+// 戻り値: Map<tradeId, holdingDays>
+export function holdingDaysBySell(trades) {
+  const sorted = trades
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => {
+      if (a.t.date < b.t.date) return -1;
+      if (a.t.date > b.t.date) return 1;
+      return a.i - b.i;
+    })
+    .map((x) => x.t);
+
+  const lots = {}; // code -> [{ date, qty }]（古い順の待ち行列）
+  const result = new Map();
+
+  for (const tr of sorted) {
+    const code = String(tr.code);
+    const qty = Number(tr.quantity);
+    if (!lots[code]) lots[code] = [];
+
+    if (tr.side === "買") {
+      lots[code].push({ date: tr.date, qty });
+    } else if (tr.side === "売") {
+      let remaining = qty;
+      let dayQty = 0; // Σ(日数 × 株数)
+      let matchedQty = 0; // 突き合わせできた株数
+      const queue = lots[code];
+      while (remaining > 0 && queue.length > 0) {
+        const lot = queue[0];
+        const take = Math.min(remaining, lot.qty);
+        dayQty += daysBetween(lot.date, tr.date) * take;
+        matchedQty += take;
+        lot.qty -= take;
+        remaining -= take;
+        if (lot.qty === 0) queue.shift();
+      }
+      if (matchedQty > 0) result.set(tr.id, dayQty / matchedQty);
+    }
+  }
+  return result;
+}
+
+// 平均(空配列は null を返す)
+function mean(arr) {
+  if (arr.length === 0) return null;
+  return arr.reduce((s, x) => s + x, 0) / arr.length;
+}
+
+// トレード成績(KPI)を計算する。すべて実現損益ベース。
+// year を渡すとその年の売却に限定する(例 "2026")。省略時は全期間。
+// 戻り値: 各指標(該当データが無い項目は null)
+export function calcKpis(trades, year) {
+  const { records } = calcRealized(trades);
+  const sells = year ? records.filter((r) => r.date.slice(0, 4) === year) : records;
+
+  const wins = sells.filter((r) => r.pnl > 0);
+  const losses = sells.filter((r) => r.pnl < 0);
+  const sellCount = sells.length;
+  const buyCount = trades.filter(
+    (t) => t.side === "買" && (!year || t.date.slice(0, 4) === year)
+  ).length;
+
+  const winRate = sellCount > 0 ? wins.length / sellCount : null;
+  const avgWin = mean(wins.map((r) => r.pnl)); // 正 or null
+  const avgLoss = mean(losses.map((r) => r.pnl)); // 負 or null
+  const payoffRatio =
+    avgWin !== null && avgLoss !== null && avgLoss !== 0
+      ? avgWin / Math.abs(avgLoss)
+      : null;
+  const expectancy = mean(sells.map((r) => r.pnl)); // 平均 pnl = 期待値/売却
+
+  // 最大ドローダウン（今年の累積実現損益のピーク→谷の最大幅）
+  const series = cumulative(sells);
+  let peak = 0;
+  let maxDrawdown = 0;
+  for (const p of series) {
+    if (p.cum > peak) peak = p.cum;
+    const dd = peak - p.cum;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+  }
+
+  // 平均保有期間（全体／勝ち／負け）
+  const holdMap = holdingDaysBySell(trades);
+  const holdAll = [];
+  const holdWin = [];
+  const holdLoss = [];
+  for (const r of sells) {
+    const d = holdMap.get(r.tradeId);
+    if (d === undefined) continue;
+    holdAll.push(d);
+    if (r.pnl > 0) holdWin.push(d);
+    else if (r.pnl < 0) holdLoss.push(d);
+  }
+
+  return {
+    sellCount,
+    buyCount,
+    winRate, // 0..1 or null
+    winningCount: wins.length,
+    losingCount: losses.length,
+    avgWin, // 正 or null
+    avgLoss, // 負 or null
+    payoffRatio, // 倍 or null
+    expectancy, // 円/売却 or null
+    maxDrawdown, // 円（>=0）
+    avgHoldDays: mean(holdAll), // 日 or null
+    avgHoldDaysWin: mean(holdWin),
+    avgHoldDaysLoss: mean(holdLoss),
+    pnls: sells.map((r) => r.pnl), // ヒストグラム用
+  };
+}
