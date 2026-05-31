@@ -7,7 +7,7 @@ import {
   loadMaster,
   saveMaster,
 } from "./drive.js";
-import { loadStocks, codeToName } from "./stocks.js";
+import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { calcRealized, aggregate } from "./pnl.js";
 import { renderCumulative } from "./charts.js";
 
@@ -158,6 +158,8 @@ function openForm(trade) {
   $("f-code").value = trade ? trade.code : "";
   $("f-qty").value = trade ? trade.quantity : "";
   $("f-price").value = trade ? trade.price : "";
+  $("f-search").value = "";
+  hideSuggest();
   setSide(trade ? trade.side : "買");
   updateNamePreview();
   $("form-card").hidden = false;
@@ -167,6 +169,7 @@ function openForm(trade) {
 function closeForm() {
   $("form-card").hidden = true;
   $("add-toggle").hidden = false;
+  hideSuggest();
   editingId = null;
 }
 function setSide(side) {
@@ -174,10 +177,79 @@ function setSide(side) {
   for (const b of $("f-side").querySelectorAll("button")) {
     b.classList.toggle("active", b.dataset.side === side);
   }
+  updateHoldingsPicker();
 }
 function updateNamePreview() {
   const code = $("f-code").value.trim();
   $("f-name").textContent = code.length === 4 ? codeToName(code) || "（名称未登録）" : "";
+}
+
+// ---------- 銘柄サジェスト ----------
+function hideSuggest() {
+  const list = $("suggest-list");
+  list.hidden = true;
+  list.innerHTML = "";
+}
+
+function renderSuggest(query) {
+  const list = $("suggest-list");
+  const items = searchStocks(query);
+  if (items.length === 0) {
+    list.hidden = true;
+    list.innerHTML = "";
+    return;
+  }
+  list.innerHTML = items
+    .map(
+      (it) =>
+        `<li data-code="${it.code}"><span class="s-name">${it.name || "（名称未登録）"}</span>` +
+        `<span class="s-code">${it.code}</span></li>`
+    )
+    .join("");
+  list.hidden = false;
+}
+
+// サジェスト/保有ピッカーから銘柄を確定し、コード欄へ反映する。
+function selectStock(code) {
+  $("f-code").value = code;
+  updateNamePreview();
+  hideSuggest();
+  $("f-search").value = "";
+}
+
+// ---------- 保有から売却 ----------
+function currentHoldings() {
+  const { holdings } = calcRealized(store.getTrades());
+  return Object.entries(holdings)
+    .filter(([, h]) => h.quantity > 0)
+    .map(([code, h]) => ({ code, quantity: h.quantity, avgCost: h.cost / h.quantity }));
+}
+
+// 「売」選択時のみ保有銘柄ピッカーを表示する。
+function updateHoldingsPicker() {
+  const picker = $("holdings-picker");
+  if (currentSide !== "売") {
+    picker.hidden = true;
+    return;
+  }
+  const holds = currentHoldings();
+  const listEl = $("hp-list");
+  if (holds.length === 0) {
+    listEl.innerHTML = `<div class="hp-empty">保有中の銘柄がありません。</div>`;
+  } else {
+    listEl.innerHTML = holds
+      .map((h) => {
+        const name = codeToName(h.code) || "（名称未登録）";
+        const avg = Math.round(h.avgCost).toLocaleString("ja-JP");
+        return (
+          `<button type="button" class="hp-item" data-code="${h.code}" data-qty="${h.quantity}">` +
+          `<span class="hp-name">${name}<span class="hp-code">${h.code}</span></span>` +
+          `<span class="hp-qty">${h.quantity.toLocaleString("ja-JP")}株 ・ 平均${avg}</span></button>`
+        );
+      })
+      .join("");
+  }
+  picker.hidden = false;
 }
 
 function onSubmit(ev) {
@@ -215,6 +287,25 @@ function wireEvents() {
   $("f-side").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-side]");
     if (b) setSide(b.dataset.side);
+  });
+
+  // 銘柄サジェスト
+  $("f-search").addEventListener("input", (e) => renderSuggest(e.target.value));
+  $("suggest-list").addEventListener("click", (e) => {
+    const li = e.target.closest("li[data-code]");
+    if (li) selectStock(li.dataset.code);
+  });
+  // フォーム外タップでサジェストを閉じる
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".suggest-wrap")) hideSuggest();
+  });
+
+  // 保有から売却（タップでコード・数量を流し込む）
+  $("hp-list").addEventListener("click", (e) => {
+    const btn = e.target.closest(".hp-item");
+    if (!btn) return;
+    selectStock(btn.dataset.code);
+    $("f-qty").value = btn.dataset.qty; // 既定は全株。必要なら手で減らせる
   });
 
   $("trade-list").addEventListener("click", (e) => {

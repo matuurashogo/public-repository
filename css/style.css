@@ -86,6 +86,35 @@ tr:last-child td { border-bottom: 0; }
 .form-card input { font-size: 16px; padding: 11px 12px; border: 1px solid #d8d8dd; border-radius: 10px; background: #fafafa; }
 .form-card input:focus { outline: none; border-color: var(--blue); background: #fff; }
 .f-name { font-size: 13px; color: var(--gain); font-weight: 600; min-height: 16px; }
+
+/* 銘柄サジェスト */
+.suggest-wrap { position: relative; }
+.suggest-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  list-style: none; margin: 0; background: #fff; border: 1px solid #d8d8dd; border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.14); max-height: 240px; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; }
+.suggest-list[hidden] { display: none; }
+.suggest-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 11px 12px; font-size: 14px; cursor: pointer; border-bottom: 1px solid #f4f4f6; }
+.suggest-list li:last-child { border-bottom: 0; }
+.suggest-list li:active, .suggest-list li:hover { background: #f2f6ff; }
+.suggest-list .s-name { font-weight: 600; color: #1c1c1e; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.suggest-list .s-code { color: #b0b0b5; font-size: 12px; font-variant-numeric: tabular-nums; flex: none; }
+
+/* 保有から売却 ピッカー */
+.holdings-picker { background: #fafafa; border: 1px solid #ececf0; border-radius: 10px; padding: 10px; }
+.holdings-picker[hidden] { display: none; }
+.hp-label { font-size: 11px; color: #8a8a8e; font-weight: 600; margin-bottom: 8px; }
+.hp-list { display: flex; flex-direction: column; gap: 6px; }
+.hp-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 10px; border: 1px solid #e3e4e8; border-radius: 9px; background: #fff;
+  font-size: 13px; cursor: pointer; text-align: left; }
+.hp-item:active, .hp-item:hover { border-color: var(--blue); }
+.hp-item .hp-name { font-weight: 700; color: #1c1c1e; }
+.hp-item .hp-name .hp-code { color: #b0b0b5; font-weight: 500; font-size: 12px; margin-left: 4px; }
+.hp-item .hp-qty { color: #6a6a6e; font-variant-numeric: tabular-nums; flex: none; }
+.hp-empty { font-size: 12px; color: #b0b0b5; padding: 4px 2px; }
 .side-toggle { display: flex; gap: 8px; }
 .side-toggle button { flex: 1; padding: 11px; border: 1px solid #d8d8dd; border-radius: 10px; background: #fafafa;
                       font-size: 15px; font-weight: 700; color: #6a6a6e; cursor: pointer; }

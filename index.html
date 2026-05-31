@@ -57,6 +57,12 @@
     <div class="card-title" id="form-title">取引を追加</div>
     <form id="trade-form">
       <label>約定日<input type="date" id="f-date" required /></label>
+      <label>銘柄を検索（社名・コード）
+        <div class="suggest-wrap">
+          <input type="search" id="f-search" inputmode="text" autocomplete="off" placeholder="トヨタ / 7203" />
+          <ul id="suggest-list" class="suggest-list" hidden></ul>
+        </div>
+      </label>
       <label>銘柄コード
         <input type="text" id="f-code" inputmode="numeric" pattern="\d{4}" maxlength="4" placeholder="7203" required />
         <span id="f-name" class="f-name"></span>
@@ -64,6 +70,10 @@
       <div class="side-toggle" id="f-side">
         <button type="button" data-side="買" class="active">買</button>
         <button type="button" data-side="売">売</button>
+      </div>
+      <div class="holdings-picker" id="holdings-picker" hidden>
+        <div class="hp-label">保有から選択（タップで銘柄・数量を入力）</div>
+        <div class="hp-list" id="hp-list"></div>
       </div>
       <label>数量（株）<input type="number" id="f-qty" inputmode="numeric" min="1" step="1" placeholder="100" required /></label>
       <label>約定単価（円）<input type="number" id="f-price" inputmode="decimal" min="0" step="0.1" placeholder="2850" required /></label>
