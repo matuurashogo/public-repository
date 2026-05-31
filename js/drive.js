@@ -60,6 +60,55 @@ export function signIn() {
   });
 }
 
+// GIS ライブラリ(gsi/client)の読み込みを待つ。index.html で async 読み込みのため、
+// 起動直後はまだ未ロードのことがある。
+function whenGisReady(timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    (function poll() {
+      if (typeof google !== "undefined" && google.accounts && google.accounts.oauth2) {
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        reject(new Error("Google Identity Services の読み込みがタイムアウトしました。"));
+      } else {
+        setTimeout(poll, 50);
+      }
+    })();
+  });
+}
+
+// サイレント再認証: 既存の同意があれば UI を出さずにアクセストークンを再取得する。
+// 同意が必要 / セッションが無い / iOS のサードパーティ Cookie 制限などの場合は失敗し、
+// 呼び出し側で手動サインインにフォールバックする想定。
+export async function signInSilent(timeoutMs = 8000) {
+  await whenGisReady();
+  const client = ensureTokenClient();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(arg);
+    };
+    const timer = setTimeout(
+      () => finish(reject, new Error("サイレント認証がタイムアウトしました。")),
+      timeoutMs
+    );
+    client.callback = (resp) => {
+      if (resp && resp.access_token) {
+        _accessToken = resp.access_token;
+        finish(resolve, _accessToken);
+      } else {
+        finish(reject, new Error("トークンを取得できませんでした。"));
+      }
+    };
+    client.error_callback = (err) => finish(reject, err);
+    // prompt:"" → 既存の許可があれば UI を出さずに再取得（要・追加同意なら error_callback）
+    client.requestAccessToken({ prompt: "" });
+  });
+}
+
 function authHeaders() {
   return { Authorization: `Bearer ${_accessToken}` };
 }

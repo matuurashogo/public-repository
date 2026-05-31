@@ -4,6 +4,7 @@ import {
   isConfigured,
   isSignedIn,
   signIn,
+  signInSilent,
   loadMaster,
   saveMaster,
 } from "./drive.js";
@@ -265,6 +266,19 @@ async function init() {
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("SW登録失敗:", e));
+  }
+
+  // 起動時のサイレント再認証: 前回サインイン済みなら UI を出さずに復帰し、
+  // Drive の最新マスターを取り込む。失敗時はローカル表示のまま手動サインインを促す。
+  if (isConfigured()) {
+    setSync("busy", "同期を確認中…");
+    try {
+      await signInSilent();
+      await syncFromDrive();
+    } catch (e) {
+      console.info("サイレント認証は行えませんでした（手動サインインが必要）:", e?.message || e);
+      setSync("", "未サインイン");
+    }
   }
 }
 
