@@ -50,12 +50,42 @@ function setSync(state, text) {
 // ---------- 描画 ----------
 function renderAll() {
   const trades = tradesForCalc();
-  const { records, warnings } = calcRealized(trades);
+  const { records, warnings, holdings } = calcRealized(trades);
   renderWarnings(warnings);
   renderSummary(records);
+  renderHoldings(holdings);
   renderKpis();
   renderCumulative($("cum-chart"), records);
   renderList(trades, records);
+}
+
+// 保有銘柄カード: 銘柄 / 保有数 / 平均取得単価（取得総額の大きい順）。
+// holdings は calcRealized が返す { code: { quantity, cost } }。
+function renderHoldings(holdings) {
+  const rows = Object.entries(holdings)
+    .filter(([, h]) => h.quantity > 0)
+    .map(([code, h]) => ({ code, quantity: h.quantity, cost: h.cost, avg: h.cost / h.quantity }))
+    .sort((a, b) => b.cost - a.cost); // 取得総額の大きい順
+
+  const thead = $("holdings-table").querySelector("thead");
+  const tbody = $("holdings-table").querySelector("tbody");
+  thead.innerHTML = `<tr><th>銘柄</th><th>保有数</th><th>平均取得単価</th></tr>`;
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="3" class="table-empty">保有中の銘柄はありません</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows
+    .map((r) => {
+      const name = esc(codeToName(r.code) || "（名称未登録）");
+      const avg = Math.round(r.avg).toLocaleString("ja-JP");
+      return (
+        `<tr><td>${name} <span style="color:#b0b0b5;font-size:11px">${esc(r.code)}</span></td>` +
+        `<td>${r.quantity.toLocaleString("ja-JP")}株</td>` +
+        `<td>${avg}</td></tr>`
+      );
+    })
+    .join("");
 }
 
 // calcRealized の警告（保有超過売却など）をバナー表示する
