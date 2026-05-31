@@ -20,7 +20,7 @@
 - `js/charts.js` + `js/vendor/chart.umd.min.js`: 累積損益の折れ線グラフ（Chart.js同梱・オフライン可）。
 - `js/store.js`: マスター状態管理＋localStorage読み取りキャッシュ。
 - `js/drive.js` + `js/config.js`: Google Drive連携（`drive.file`スコープ、OAuthトークンフロー）。
-- `js/stocks.js` + `data/stocks.json`: コード→銘柄名 自動表示（約2,200銘柄）。
+- `js/stocks.js` + `data/stocks.json`: コード→銘柄名 自動表示（約3,800銘柄。主データ=subsector_master 約2,200 ＋ jquants-data の `full/` `company` 列から不足分を補完）。
 - `index.html` / `css/style.css` / `manifest.webmanifest` / `sw.js` / `icons/`: UIとPWA一式。
 - `README.md` / `DEPLOY.md`: 利用・デプロイ手順。
 
@@ -39,7 +39,7 @@
 - CSVインポート/エクスポート（バックアップ・松井CSV取込）
 - 手数料の取引別入力（現状は0円扱い）
 - 評価損益（含み損益）・現在株価取得、配当
-- 銘柄名リストの全銘柄化（J-Quants `listed_info` から `tools/gen_stocks.py` を差し替え）
+- 銘柄名の完全網羅（現状は jquants-data の `full/` で約3,800銘柄を補完済み。さらに J-Quants `listed_info` の全銘柄マスター `equity_master.jsonl` を `JQuantsExtractor/tools/export_equity_master.py` で生成し `tools/gen_stocks.py` に読ませれば全銘柄化できる）
 
 ## 開発メモ
 

@@ -17,6 +17,7 @@ equity_master.jsonl は private リポで次を実行して生成する:
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
@@ -44,6 +45,28 @@ def _find_in_candidates(filename: str) -> str | None:
             continue
         p = os.path.join(base, filename)
         if os.path.exists(p):
+            return os.path.abspath(p)
+    return None
+
+
+# jquants-data リポジトリ（J-Quants データの Parquet 蓄積）の場所候補。
+# full/sector33_*.parquet の `company` 列に全上場銘柄の社名が入っており、
+# 主データ（subsector_master）に無い銘柄名の補完に使う。
+# 環境変数 JQUANTS_PARQUET_REPO で明示指定も可能。
+_CANDIDATE_JQUANTS_REPOS = [
+    os.environ.get("JQUANTS_PARQUET_REPO", ""),
+    os.path.join(PARENT, "jquants-data"),  # 兄弟ディレクトリ
+    os.path.join(PUBLIC_ROOT, "..", "jquants-data"),
+]
+
+
+def _find_jquants_full_dir() -> str | None:
+    """jquants-data の full/ ディレクトリ（sector33_*.parquet 群）を探して返す。"""
+    for base in _CANDIDATE_JQUANTS_REPOS:
+        if not base:
+            continue
+        p = os.path.join(base, "full")
+        if os.path.isdir(p) and glob.glob(os.path.join(p, "sector33_*.parquet")):
             return os.path.abspath(p)
     return None
 
@@ -102,6 +125,59 @@ def from_subsector_master(path: str) -> dict[str, str]:
     return mapping
 
 
+def from_full_financials(full_dir: str) -> dict[str, str]:
+    """jquants-data の full/sector33_*.parquet（財務データ）から code→社名 を作る。
+
+    各ファイルの `code`（J-Quants 5桁ローカルコード）と `company`（社名）列を読む。
+    全上場銘柄を概ね網羅するため、主データに無い銘柄名の補完に使える。
+    pyarrow が無い場合は空 dict を返す（任意依存）。
+    """
+    try:
+        import pyarrow.parquet as pq  # type: ignore
+    except ImportError:
+        print(
+            "  注意: pyarrow が無いため jquants-data からの補完をスキップします"
+            "（pip install pyarrow で有効化）。",
+            file=sys.stderr,
+        )
+        return {}
+
+    mapping: dict[str, str] = {}
+    for path in sorted(glob.glob(os.path.join(full_dir, "sector33_*.parquet"))):
+        table = pq.read_table(path, columns=["code", "company"])
+        codes = table.column("code").to_pylist()
+        names = table.column("company").to_pylist()
+        for code, name in zip(codes, names):
+            if code is None or not name:
+                continue
+            code4 = to_code4(str(code))
+            # 4桁の証券コード（数字のみ、または新形式の英数字 例 130A）を許可
+            if not re.fullmatch(r"[0-9][0-9A-Z]{3}", code4):
+                continue
+            name = str(name).strip()
+            if name:
+                mapping.setdefault(code4, name)
+    return mapping
+
+
+def supplement_with_jquants(mapping: dict[str, str]) -> int:
+    """jquants-data の財務データから、未収録コードの社名のみを補完する。
+
+    既存（主データ由来）の名前は上書きしない（追加のみ）。追加件数を返す。
+    """
+    full_dir = _find_jquants_full_dir()
+    if not full_dir:
+        return 0
+    added = 0
+    for code4, name in from_full_financials(full_dir).items():
+        if code4 not in mapping:
+            mapping[code4] = name
+            added += 1
+    if added:
+        print(f"  jquants-data から {added} 銘柄の名前を補完しました（{full_dir}）。")
+    return added
+
+
 def resolve_source(arg: str | None) -> tuple[str, str]:
     """入力ファイルと種別を解決する。戻り値: (path, kind)。kind は "equity" | "subsector"。"""
     if arg:
@@ -128,6 +204,9 @@ def main() -> None:
         raise SystemExit(f"入力が見つかりません: {src}")
 
     mapping = from_equity_master(src) if kind == "equity" else from_subsector_master(src)
+
+    # jquants-data の財務データ（full/）で未収録銘柄の名前を補完（任意・あれば実施）
+    supplement_with_jquants(mapping)
 
     ordered = dict(sorted(mapping.items()))
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
