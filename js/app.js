@@ -8,7 +8,7 @@ import {
   saveMaster,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
-import { loadPrices, getPriceMap, getPriceDate, getPriceFetchedAt } from "./prices.js";
+import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
 import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized } from "./pnl.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
@@ -40,19 +40,6 @@ function formatPct(rate) {
   const v = rate * 100;
   const s = v > 0 ? "+" : v < 0 ? "−" : "±";
   return s + Math.abs(v).toFixed(1) + "%";
-}
-// 価格の最終取得時刻を「今日 HH:MM」または「M/D HH:MM」で表示（0は空）
-function formatFetchedAt(ts) {
-  if (!ts) return "";
-  const d = new Date(ts);
-  const p = (n) => String(n).padStart(2, "0");
-  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  return sameDay ? `今日 ${hm}` : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 // innerHTML へ差し込む前にユーザー由来テキストをエスケープする（将来のメモ欄等に備える）
 function esc(s) {
@@ -130,7 +117,7 @@ function renderHoldings(holdings) {
     })
     .join("");
 
-  // 合計行＋基準日の注記
+  // 合計行＋基準日の注記（最小限：基準日・含み損益のみ。欠損時のみ注記を足す）
   if (note) {
     if (!hasPrices) {
       note.textContent = "最新株価が取得できませんでした（含み損益は非表示）。";
@@ -140,12 +127,10 @@ function renderHoldings(holdings) {
       const cls = gainLossClass(total.unrealized);
       const excluded = total.pricedAll
         ? ""
-        : ` ／ ${total.unpricedCount}銘柄は株価未取得のため合計から除外`;
-      const fetched = formatFetchedAt(getPriceFetchedAt());
-      const updated = fetched ? ` ／ 最終取得 ${esc(fetched)}` : "";
+        : ` ／ ${total.unpricedCount}銘柄は株価未取得`;
+      const shortDate = esc(date).replace(/^\d{4}-/, "").replace("-", "/"); // 2026-06-01 → 06/01
       note.innerHTML =
-        `${esc(date)}終値ベースの含み損益（未実現）：評価額 ${yen(total.marketValue)}円 ／ ` +
-        `合計 <span class="${cls}">${formatYen(total.unrealized)}</span>円${totalRate}${esc(excluded)}${updated}`;
+        `${shortDate}終値 ／ 含み損益 <span class="${cls}">${formatYen(total.unrealized)}</span>円${totalRate}${esc(excluded)}`;
     }
   }
 }
