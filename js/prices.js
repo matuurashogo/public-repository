@@ -5,6 +5,7 @@
 let _prices = {}; // { code: number }
 let _date = ""; // 基準日 YYYY-MM-DD
 let _source = "";
+let _fetchedAt = 0; // 最後に取得に成功した時刻（epoch ms）。未取得は0。
 
 export async function loadPrices() {
   try {
@@ -14,6 +15,7 @@ export async function loadPrices() {
       _prices = (data && data.prices) || {};
       _date = (data && data.date) || "";
       _source = (data && data.source) || "";
+      _fetchedAt = Date.now();
     }
   } catch (e) {
     // 取得できなくても致命的ではない（含み損益が出ないだけ）
@@ -39,4 +41,9 @@ export function getPriceDate() {
 
 export function getPriceSource() {
   return _source;
+}
+
+// 最後に価格取得に成功した時刻（epoch ms）。未取得は0。
+export function getPriceFetchedAt() {
+  return _fetchedAt;
 }

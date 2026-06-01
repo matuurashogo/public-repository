@@ -8,7 +8,7 @@ import {
   saveMaster,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
-import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
+import { loadPrices, getPriceMap, getPriceDate, getPriceFetchedAt } from "./prices.js";
 import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized } from "./pnl.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
@@ -40,6 +40,19 @@ function formatPct(rate) {
   const v = rate * 100;
   const s = v > 0 ? "+" : v < 0 ? "−" : "±";
   return s + Math.abs(v).toFixed(1) + "%";
+}
+// 価格の最終取得時刻を「今日 HH:MM」または「M/D HH:MM」で表示（0は空）
+function formatFetchedAt(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return sameDay ? `今日 ${hm}` : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 // innerHTML へ差し込む前にユーザー由来テキストをエスケープする（将来のメモ欄等に備える）
 function esc(s) {
@@ -128,9 +141,11 @@ function renderHoldings(holdings) {
       const excluded = total.pricedAll
         ? ""
         : ` ／ ${total.unpricedCount}銘柄は株価未取得のため合計から除外`;
+      const fetched = formatFetchedAt(getPriceFetchedAt());
+      const updated = fetched ? ` ／ 最終取得 ${esc(fetched)}` : "";
       note.innerHTML =
         `${esc(date)}終値ベースの含み損益（未実現）：評価額 ${yen(total.marketValue)}円 ／ ` +
-        `合計 <span class="${cls}">${formatYen(total.unrealized)}</span>円${totalRate}${esc(excluded)}`;
+        `合計 <span class="${cls}">${formatYen(total.unrealized)}</span>円${totalRate}${esc(excluded)}${updated}`;
     }
   }
 }
@@ -572,6 +587,33 @@ function wireEvents() {
       setSync("error", "サインインに失敗");
     }
   });
+
+  // アプリが前面に戻ったら最新株価を取り直して含み損益を更新する。
+  // iOSのホーム画面アプリ（PWA）はブラウザのような手動リロードができないため、
+  // 復帰イベント起点で再取得し、ブラウザ更新なしで含み損益を最新化する。
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshPricesOnForeground();
+  });
+  window.addEventListener("focus", refreshPricesOnForeground); // PC/一部ブラウザ向けの保険
+}
+
+// 前面復帰時の株価リフレッシュ。短時間の連続復帰での無駄な再取得を防ぐためスロットルする。
+let _lastPriceRefresh = 0;
+async function refreshPricesOnForeground() {
+  const now = Date.now();
+  if (now - _lastPriceRefresh < 60_000) return; // 60秒以内の再復帰はスキップ
+  _lastPriceRefresh = now;
+  try {
+    const before = getPriceDate();
+    await loadPrices(); // ネットワーク優先（SW設定）。失敗時は前回値のまま。
+    // 価格は renderHoldings 内で getPriceMap() を都度参照するため、再描画で反映される
+    renderAll();
+    if (before !== getPriceDate()) {
+      console.info("最新株価を取得しました:", getPriceDate());
+    }
+  } catch (e) {
+    console.warn("株価の再取得に失敗:", e);
+  }
 }
 
 // ---------- 起動 ----------
