@@ -10,7 +10,7 @@ import {
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
 import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize } from "./pnl.js";
-import { prefetchIndicators, getSnapshot, bucketOf } from "./indicators.js";
+import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 
@@ -36,7 +36,38 @@ async function refreshIndicators() {
   const codes = store.getTrades().filter((t) => t.side === "買").map((t) => t.code);
   await prefetchIndicators(codes);
   renderTagBreakdown();
+  renderMissingIndicators();
   renderList(tradesForCalc(), calcRealized(tradesForCalc()).records);
+}
+
+// 取引したが客観データ未取得（監視リスト外など）の銘柄を一覧表示し、追加を案内する。
+// 取得が確定した銘柄のみ判定するため、先読み完了前は何も出さない（誤検出を防ぐ）。
+function renderMissingIndicators() {
+  const seen = new Set();
+  const missing = [];
+  for (const t of store.getTrades()) {
+    if (t.side !== "買") continue;
+    const code = String(t.code);
+    if (seen.has(code)) continue;
+    seen.add(code);
+    if (indicatorStatus(code) === "missing") {
+      missing.push({ code, name: codeToName(code) || "（名称未登録）" });
+    }
+  }
+
+  const card = $("missing-card");
+  if (missing.length === 0) {
+    card.hidden = true;
+    return;
+  }
+  missing.sort((a, b) => (a.code < b.code ? -1 : 1));
+  $("missing-note").textContent =
+    `${missing.length}銘柄は客観スナップショットがありません。下のコードを data/indicators_universe.json の codes に追加すると、次回のデータ更新から表示されます。`;
+  $("missing-list").innerHTML = missing
+    .map((m) => `<span class="missing-chip">${esc(m.name)}<span class="missing-code">${esc(m.code)}</span></span>`)
+    .join("");
+  // 監視リストへ貼り付けやすい形（"7011", "9501"）でコピーできるよう data 属性に持たせる
+  $("missing-copy").dataset.codes = missing.map((m) => `"${m.code}"`).join(", ");
 }
 
 // ---------- 表示ユーティリティ ----------
@@ -75,6 +106,7 @@ function renderAll() {
   renderHoldings(holdings);
   renderKpis();
   renderTagBreakdown();
+  renderMissingIndicators();
   renderCumulative($("cum-chart"), records);
   renderList(trades, records);
 }
@@ -702,6 +734,21 @@ function wireEvents() {
   $("tag-axis").addEventListener("change", (e) => {
     tagAxis = e.target.value;
     renderTagBreakdown();
+  });
+
+  // 未取得銘柄コードのコピー（監視リストへ貼り付けやすい形式）
+  $("missing-copy").addEventListener("click", async (e) => {
+    const text = e.currentTarget.dataset.codes || "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      e.currentTarget.textContent = "コピーしました";
+      setTimeout(() => (e.currentTarget.textContent = "コードをコピー"), 1500);
+    } catch (err) {
+      console.warn("クリップボードへのコピーに失敗:", err);
+      e.currentTarget.textContent = "コピーできませんでした";
+      setTimeout(() => (e.currentTarget.textContent = "コードをコピー"), 1500);
+    }
   });
 
   // 銘柄サジェスト

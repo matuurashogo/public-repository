@@ -3,7 +3,8 @@
 // 買い日付時点の客観指標（dev=25日線乖離 / abv=75日線上か / vol=出来高20日平均比）を返す。
 // データの正は jquants-data（GitHub Actions が日次生成して同梱）。
 
-const _cache = {}; // code -> payload(object) | null（null = 取得済みだが対象外/欠損）
+const _cache = {}; // code -> payload(object) | null（取得完了後のみ設定。null = 監視リスト外/欠損）
+const _inflight = {}; // code -> Promise（取得中。完了まで _cache には入れない）
 
 // 指定コード群の指標を必要分だけ先読みする（重複は1回だけ）。
 export async function prefetchIndicators(codes) {
@@ -15,18 +16,32 @@ export async function prefetchIndicators(codes) {
 export async function loadIndicator(code) {
   code = String(code);
   if (code in _cache) return _cache[code];
-  _cache[code] = null; // 同時並行の二重取得を防ぐ仮置き
-  try {
-    const res = await fetch(`./data/indicators/${code}.json`, { cache: "no-cache" });
-    if (res.ok) {
-      const data = await res.json();
-      _cache[code] = data && Array.isArray(data.rows) ? data : null;
+  if (code in _inflight) return _inflight[code];
+  const p = (async () => {
+    let result = null;
+    try {
+      const res = await fetch(`./data/indicators/${code}.json`, { cache: "no-cache" });
+      if (res.ok) {
+        const data = await res.json();
+        result = data && Array.isArray(data.rows) ? data : null;
+      }
+    } catch (e) {
+      // 取得できなくても致命的ではない（客観スナップショットが出ないだけ）
+      console.warn(`indicators/${code}.json の読み込みに失敗:`, e);
     }
-  } catch (e) {
-    // 取得できなくても致命的ではない（客観スナップショットが出ないだけ）
-    console.warn(`indicators/${code}.json の読み込みに失敗:`, e);
-  }
-  return _cache[code];
+    _cache[code] = result; // 取得完了時のみ確定（in-flight 中は status=unknown）
+    delete _inflight[code];
+    return result;
+  })();
+  _inflight[code] = p;
+  return p;
+}
+
+// 取得状態: "ok"（データあり）/ "missing"（取得済みだが監視リスト外・欠損）/ "unknown"（未取得・取得中）。
+export function indicatorStatus(code) {
+  code = String(code);
+  if (!(code in _cache)) return "unknown";
+  return _cache[code] ? "ok" : "missing";
 }
 
 // d 昇順の rows から d <= date を満たす最後の行を二分探索して返す純粋関数（テスト対象）。

@@ -202,6 +202,13 @@ td.muted { color: #b0b0b5; }
   background: #f0f0f3; border-radius: 6px; padding: 2px 8px; margin-top: 5px; }
 .trade-snap { font-size: 11px; color: #8a8a8e; margin-top: 4px; font-variant-numeric: tabular-nums; }
 
+/* 客観データ未取得の銘柄カード */
+.missing-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+.missing-chip { display: inline-flex; align-items: baseline; gap: 6px; font-size: 13px; font-weight: 600;
+  color: #5b5b60; background: #f0f0f3; border-radius: 8px; padding: 6px 10px; }
+.missing-chip .missing-code { color: #b0b0b5; font-weight: 500; font-size: 11px; font-variant-numeric: tabular-nums; }
+.missing-copy { width: 100%; }
+
 /* 型別成績の集計軸セレクト */
 .bd-axis-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px;
   color: #6a6a6e; font-weight: 600; margin-bottom: 14px; }
