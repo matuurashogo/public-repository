@@ -2,7 +2,7 @@
 //   実行: node --test tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeMasters } from "../js/store.js";
+import { mergeMasters, Store, SEED_ENTRY_TAGS, SEED_EXIT_TAGS } from "../js/store.js";
 
 const T = (id, updatedAt, extra = {}) => ({
   id,
@@ -60,6 +60,43 @@ test("version1（updatedAt/deletedIds欠損）でも安全にマージできる"
   const local = { version: 1, trades: [{ id: "a", date: "2026-01-01", code: "7203", side: "買", quantity: 100, price: 1000 }] };
   const remote = { version: 1, trades: [{ id: "b", date: "2026-01-02", code: "6758", side: "買", quantity: 100, price: 2000 }] };
   const m = mergeMasters(local, remote);
-  assert.equal(m.version, 2);
+  assert.equal(m.version, 3);
   assert.deepEqual(m.trades.map((t) => t.id).sort(), ["a", "b"]);
+});
+
+test("version3: 旧データ正規化でタグseedが補われ、取引のタグ欄はnull既定", () => {
+  // entryTags/exitTags 欠損のマスター → seed が補われる
+  const m = mergeMasters({ version: 2, trades: [T("a", 100)], deletedIds: {} }, null);
+  assert.deepEqual(m.entryTags, SEED_ENTRY_TAGS);
+  assert.deepEqual(m.exitTags, SEED_EXIT_TAGS);
+  assert.equal(m.trades[0].entryTag, null);
+  assert.equal(m.trades[0].exitTag, null);
+});
+
+test("既存のタグ値は尊重され上書きされない", () => {
+  const tagged = T("a", 100, { side: "買", entryTag: "25日線タッチ", entryNote: "メモ" });
+  const m = mergeMasters({ version: 3, trades: [tagged], deletedIds: {}, entryTags: ["独自タグ"] }, null);
+  assert.equal(m.trades[0].entryTag, "25日線タッチ");
+  assert.equal(m.trades[0].entryNote, "メモ");
+  assert.ok(m.entryTags.includes("独自タグ"));
+});
+
+test("マージ時、タグ候補は両端末の和集合で残る（消失しない）", () => {
+  const local = { version: 3, trades: [], deletedIds: {}, entryTags: ["A", "B"], exitTags: ["X"] };
+  const remote = { version: 3, trades: [], deletedIds: {}, entryTags: ["B", "C"], exitTags: ["Y"] };
+  const m = mergeMasters(local, remote);
+  assert.deepEqual(m.entryTags, ["A", "B", "C"]); // 順序保持・重複排除
+  assert.deepEqual(m.exitTags, ["X", "Y"]);
+});
+
+test("Store.addEntryTag / addExitTag: 重複と空白は無視・trimされる", () => {
+  const s = new Store();
+  // 空配列は normalizeTagList が seed へフォールバックするため、明示の非空リストで検証する
+  s.setMaster({ version: 3, trades: [], deletedIds: {}, entryTags: ["A"], exitTags: ["既存"] });
+  assert.equal(s.addEntryTag("B"), true);
+  assert.equal(s.addEntryTag("A"), false); // 既存は無視
+  assert.equal(s.addEntryTag("  "), false); // 空白は無視
+  assert.deepEqual(s.getMaster().entryTags, ["A", "B"]);
+  assert.equal(s.addExitTag(" 利確 "), true); // trim される
+  assert.deepEqual(s.getMaster().exitTags, ["既存", "利確"]);
 });

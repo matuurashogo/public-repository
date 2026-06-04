@@ -9,7 +9,7 @@ import {
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
-import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized } from "./pnl.js";
+import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown } from "./pnl.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 
@@ -18,6 +18,9 @@ let axis = "month"; // year | month | code
 let editingId = null;
 let currentSide = "買";
 let currentAccount = "特定"; // 特定 | NISA
+let currentEntryTag = null; // フォームで選択中のエントリー根拠タグ
+let currentExitTag = null; // フォームで選択中の手仕舞い根拠タグ
+let tagAxis = "entry"; // 型別成績の軸: entry | exit
 
 const $ = (id) => document.getElementById(id);
 
@@ -62,8 +65,93 @@ function renderAll() {
   renderSummary(records);
   renderHoldings(holdings);
   renderKpis();
+  renderTagBreakdown();
   renderCumulative($("cum-chart"), records);
   renderList(trades, records);
+}
+
+// ---------- エントリー型別成績 ----------
+function renderTagBreakdown() {
+  const rows = tagBreakdown(tradesForCalc(), tagAxis).filter((r) => r.count > 0);
+  const isEntry = tagAxis === "entry";
+  const thead = $("tag-breakdown-table").querySelector("thead");
+  const tbody = $("tag-breakdown-table").querySelector("tbody");
+  const note = $("tag-breakdown-note");
+
+  thead.innerHTML =
+    `<tr><th>${isEntry ? "入口タグ" : "出口タグ"}</th><th>回数</th><th>勝率</th><th>平均利益/損失</th><th>合計</th></tr>`;
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${isEntry ? "売却の記録がまだありません" : "売却の記録がまだありません"}</td></tr>`;
+    note.textContent = "";
+    return;
+  }
+
+  const pct = (v) => (v === null ? "—" : (v * 100).toFixed(0) + "%");
+  tbody.innerHTML = rows
+    .map((r) => {
+      const avgWin = r.avgWin === null ? "—" : formatYen(r.avgWin);
+      const avgLoss = r.avgLoss === null ? "—" : formatYen(r.avgLoss);
+      return (
+        `<tr><td>${esc(r.tag)}</td>` +
+        `<td>${r.count}回<div class="bd-sub">${r.winningCount}勝${r.losingCount}敗</div></td>` +
+        `<td>${pct(r.winRate)}</td>` +
+        `<td><span class="gain">${avgWin}</span> / <span class="loss">${avgLoss}</span></td>` +
+        `<td class="${gainLossClass(r.totalPnl)}">${formatYen(r.totalPnl)}</td></tr>`
+      );
+    })
+    .join("");
+
+  note.textContent = isEntry
+    ? "入口タグ別。売却損益をFIFOで買いロットへ遡って集計（1対1は厳密、分割は株数按分）。"
+    : "出口タグ別。各売却の実現損益をそのまま集計。";
+}
+
+// ---------- タグchip（入力フォーム）----------
+function renderTagChips() {
+  const m = store.getMaster();
+  $("entry-tags").innerHTML = chipsHtml(m.entryTags, currentEntryTag, "entry");
+  $("exit-tags").innerHTML = chipsHtml(m.exitTags, currentExitTag, "exit");
+}
+function chipsHtml(tags, selected, kind) {
+  const chips = (tags || []).map((t) => {
+    const on = t === selected;
+    return (
+      `<button type="button" class="tag-chip${on ? " active" : ""}" ` +
+      `data-tag="${esc(t)}" data-kind="${kind}" aria-pressed="${on ? "true" : "false"}">${esc(t)}</button>`
+    );
+  });
+  chips.push(`<button type="button" class="tag-chip add" data-add="${kind}">＋新規</button>`);
+  return chips.join("");
+}
+
+// chip のタップ: ＋新規はタグ追加、それ以外は単一選択トグル（再タップで解除）
+function onTagChipClick(e) {
+  const addBtn = e.target.closest("button[data-add]");
+  if (addBtn) {
+    addTagPrompt(addBtn.dataset.add);
+    return;
+  }
+  const chip = e.target.closest("button[data-tag]");
+  if (!chip) return;
+  const tag = chip.dataset.tag;
+  if (chip.dataset.kind === "entry") {
+    currentEntryTag = currentEntryTag === tag ? null : tag;
+  } else {
+    currentExitTag = currentExitTag === tag ? null : tag;
+  }
+  renderTagChips();
+}
+
+// 新規タグを追加（iOS Safari でも使える prompt）。追加後はそのタグを選択状態にする。
+function addTagPrompt(kind) {
+  const name = (window.prompt(kind === "entry" ? "新しいエントリー根拠タグ" : "新しい手仕舞い根拠タグ") || "").trim();
+  if (!name) return;
+  const added = kind === "entry" ? store.addEntryTag(name) : store.addExitTag(name);
+  if (kind === "entry") currentEntryTag = name;
+  else currentExitTag = name;
+  renderTagChips();
+  if (added) saveToDrive();
 }
 
 // 保有銘柄カード: 銘柄 / 保有数 / 平均取得単価 / 現在値 / 評価額 / 含み損益（評価額の大きい順）。
@@ -287,10 +375,12 @@ function renderList(trades, records) {
       const nisa = t.account === "NISA" ? `<span class="acct-tag">NISA</span>` : "";
       const fee = Number(t.fee) > 0 ? ` ・ 手数料${Number(t.fee).toLocaleString("ja-JP")}` : "";
       const label = `${name} ${t.code}`;
+      const rtag = isSell ? t.exitTag : t.entryTag;
+      const tagBadge = rtag ? `<div class="trade-tag">${esc(rtag)}</div>` : "";
       return (
         `<div class="trade">` +
         `<div class="left"><div class="name">${name}<span class="code">${esc(t.code)}</span>${nisa}</div>` +
-        `<div class="meta">${esc(t.date.replace(/-/g, "/"))} ・ ${esc(t.quantity)}株 @${price}${fee}</div></div>` +
+        `<div class="meta">${esc(t.date.replace(/-/g, "/"))} ・ ${esc(t.quantity)}株 @${price}${fee}</div>${tagBadge}</div>` +
         `<div class="right">${right}` +
         `<span class="badge ${isSell ? "sell" : "buy"}">${t.side}</span>` +
         `<span class="row-actions">` +
@@ -375,8 +465,13 @@ function openForm(trade) {
   $("f-price").value = trade ? trade.price : "";
   $("f-search").value = "";
   hideSuggest();
+  currentEntryTag = trade ? trade.entryTag ?? null : null;
+  currentExitTag = trade ? trade.exitTag ?? null : null;
+  $("f-entry-note").value = trade && trade.entryNote ? trade.entryNote : "";
+  $("f-exit-note").value = trade && trade.exitNote ? trade.exitNote : "";
   setSide(trade ? trade.side : "買");
   setAccount(trade ? trade.account || "特定" : "特定");
+  renderTagChips();
   updateNamePreview();
   $("form-card").hidden = false;
   $("add-toggle").hidden = true;
@@ -396,6 +491,9 @@ function setSide(side) {
     b.setAttribute("aria-pressed", on ? "true" : "false");
   }
   updateHoldingsPicker();
+  // 根拠ブロックを売買で出し分ける（買い=エントリー / 売り=手仕舞い）
+  $("entry-rationale").hidden = side !== "買";
+  $("exit-rationale").hidden = side !== "売";
 }
 function setAccount(acct) {
   currentAccount = acct;
@@ -490,6 +588,18 @@ function onSubmit(ev) {
   }
   // 手数料は松井ボックスレートで自動算出するため、ここでは保持しない
   const trade = { date, code, side: currentSide, quantity, price, account: currentAccount };
+  // 売買に応じて根拠を載せ、反対側のフィールドは null で揃える（編集時の混入防止）
+  if (currentSide === "買") {
+    trade.entryTag = currentEntryTag;
+    trade.entryNote = $("f-entry-note").value.trim() || null;
+    trade.exitTag = null;
+    trade.exitNote = null;
+  } else {
+    trade.exitTag = currentExitTag;
+    trade.exitNote = $("f-exit-note").value.trim() || null;
+    trade.entryTag = null;
+    trade.entryNote = null;
+  }
   if (editingId) store.updateTrade(editingId, trade);
   else store.addTrade(trade);
   closeForm();
@@ -521,6 +631,23 @@ function wireEvents() {
   $("f-account").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-acct]");
     if (b) setAccount(b.dataset.acct);
+  });
+
+  // タグchip（選択トグル / ＋新規）
+  $("entry-tags").addEventListener("click", onTagChipClick);
+  $("exit-tags").addEventListener("click", onTagChipClick);
+
+  // 型別成績の軸切替（入口タグ別 / 出口タグ別）
+  $("tag-axis").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-tagaxis]");
+    if (!btn) return;
+    tagAxis = btn.dataset.tagaxis;
+    for (const b of $("tag-axis").querySelectorAll("button")) {
+      const on = b === btn;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    renderTagBreakdown();
   });
 
   // 銘柄サジェスト
@@ -606,6 +733,7 @@ async function init() {
   await Promise.all([loadStocks(), loadPrices()]);
   store.loadCache(); // 直近のキャッシュを表示（オフライン/未サインインでも閲覧可）
   wireEvents();
+  renderTagChips();
   renderAll();
   if (isConfigured()) {
     $("signin-note").textContent =
