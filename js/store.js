@@ -186,6 +186,43 @@ export class Store {
     return true;
   }
 
+  // ---- タグの改名・削除（kind: "entry" | "exit"）----
+  // 改名は候補リストと既存取引のタグを同時に更新する（updatedAtを進めて同期に乗せる）。
+  renameTag(kind, oldName, newName) {
+    const field = kind === "exit" ? "exitTags" : "entryTags";
+    const tagField = kind === "exit" ? "exitTag" : "entryTag";
+    const from = String(oldName);
+    const to = String(newName || "").trim();
+    if (!to || from === to) return false;
+    const list = this.master[field];
+    if (!Array.isArray(list)) return false;
+    const idx = list.indexOf(from);
+    if (idx === -1) return false;
+    // 改名先が既存なら重複を作らず統合する
+    if (list.includes(to)) list.splice(idx, 1);
+    else list[idx] = to;
+    for (const t of this.master.trades) {
+      if (t[tagField] === from) {
+        t[tagField] = to;
+        t.updatedAt = Date.now();
+      }
+    }
+    this._writeCache();
+    return true;
+  }
+
+  // 削除は候補リストから外すのみ（既存取引のタグ値は破壊せず残す＝履歴・集計は維持）。
+  deleteTag(kind, name) {
+    const field = kind === "exit" ? "exitTags" : "entryTags";
+    const list = this.master[field];
+    if (!Array.isArray(list)) return false;
+    const idx = list.indexOf(String(name));
+    if (idx === -1) return false;
+    list.splice(idx, 1);
+    this._writeCache();
+    return true;
+  }
+
   deleteTrade(id) {
     const before = this.master.trades.length;
     this.master.trades = this.master.trades.filter((t) => t.id !== id);

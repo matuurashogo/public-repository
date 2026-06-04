@@ -21,6 +21,8 @@ let currentSide = "買";
 let currentAccount = "特定"; // 特定 | NISA
 let currentEntryTag = null; // フォームで選択中のエントリー根拠タグ
 let currentExitTag = null; // フォームで選択中の手仕舞い根拠タグ
+let manageEntry = false; // エントリータグの管理モード（改名・削除）
+let manageExit = false; // 手仕舞いタグの管理モード
 let tagAxis = "entry"; // 型別成績の軸: entry | exit
 
 const $ = (id) => document.getElementById(id);
@@ -200,24 +202,48 @@ function renderTagChips() {
   $("exit-tags").innerHTML = chipsHtml(m.exitTags, currentExitTag, "exit");
 }
 function chipsHtml(tags, selected, kind) {
+  const manage = kind === "entry" ? manageEntry : manageExit;
   const chips = (tags || []).map((t) => {
+    if (manage) {
+      return (
+        `<span class="tag-chip manage">${esc(t)}` +
+        `<button type="button" class="tag-mini" data-rename="${esc(t)}" data-kind="${kind}" aria-label="${esc(t)} を改名">✎</button>` +
+        `<button type="button" class="tag-mini del" data-delete="${esc(t)}" data-kind="${kind}" aria-label="${esc(t)} を削除">×</button>` +
+        `</span>`
+      );
+    }
     const on = t === selected;
     return (
       `<button type="button" class="tag-chip${on ? " active" : ""}" ` +
       `data-tag="${esc(t)}" data-kind="${kind}" aria-pressed="${on ? "true" : "false"}">${esc(t)}</button>`
     );
   });
-  chips.push(`<button type="button" class="tag-chip add" data-add="${kind}">＋新規</button>`);
+  if (manage) {
+    chips.push(`<button type="button" class="tag-chip done" data-managedone="${kind}">完了</button>`);
+  } else {
+    chips.push(`<button type="button" class="tag-chip add" data-add="${kind}">＋新規</button>`);
+    chips.push(`<button type="button" class="tag-chip manage-toggle" data-manage="${kind}">管理</button>`);
+  }
   return chips.join("");
 }
 
-// chip のタップ: ＋新規はタグ追加、それ以外は単一選択トグル（再タップで解除）
+// chip のタップ: ＋新規/管理/完了/改名/削除/選択トグルを振り分ける
 function onTagChipClick(e) {
   const addBtn = e.target.closest("button[data-add]");
-  if (addBtn) {
-    addTagPrompt(addBtn.dataset.add);
-    return;
-  }
+  if (addBtn) return addTagPrompt(addBtn.dataset.add);
+
+  const manageBtn = e.target.closest("button[data-manage]");
+  if (manageBtn) return setManage(manageBtn.dataset.manage, true);
+
+  const doneBtn = e.target.closest("button[data-managedone]");
+  if (doneBtn) return setManage(doneBtn.dataset.managedone, false);
+
+  const renBtn = e.target.closest("button[data-rename]");
+  if (renBtn) return renameTagPrompt(renBtn.dataset.kind, renBtn.dataset.rename);
+
+  const delBtn = e.target.closest("button[data-delete]");
+  if (delBtn) return deleteTagConfirm(delBtn.dataset.kind, delBtn.dataset.delete);
+
   const chip = e.target.closest("button[data-tag]");
   if (!chip) return;
   const tag = chip.dataset.tag;
@@ -227,6 +253,37 @@ function onTagChipClick(e) {
     currentExitTag = currentExitTag === tag ? null : tag;
   }
   renderTagChips();
+}
+
+// 管理モードの開始/終了
+function setManage(kind, on) {
+  if (kind === "entry") manageEntry = on;
+  else manageExit = on;
+  renderTagChips();
+}
+
+// タグの改名（候補リストと既存取引・選択中タグを追従）
+function renameTagPrompt(kind, oldName) {
+  const next = window.prompt("タグの新しい名前", oldName);
+  if (next == null) return;
+  const to = next.trim();
+  if (!to || to === oldName) return;
+  if (!store.renameTag(kind, oldName, to)) return;
+  if (kind === "entry" && currentEntryTag === oldName) currentEntryTag = to;
+  if (kind === "exit" && currentExitTag === oldName) currentExitTag = to;
+  renderTagChips();
+  renderAll(); // 取引履歴・型別成績のタグ表示を更新
+  saveToDrive();
+}
+
+// タグの削除（候補から外すのみ。過去取引の記録は残す）
+function deleteTagConfirm(kind, name) {
+  if (!window.confirm(`タグ「${name}」を候補から削除しますか？\n（過去の取引に付いた記録はそのまま残ります）`)) return;
+  if (!store.deleteTag(kind, name)) return;
+  if (kind === "entry" && currentEntryTag === name) currentEntryTag = null;
+  if (kind === "exit" && currentExitTag === name) currentExitTag = null;
+  renderTagChips();
+  saveToDrive();
 }
 
 // 新規タグを追加（iOS Safari でも使える prompt）。追加後はそのタグを選択状態にする。
@@ -559,6 +616,8 @@ function openForm(trade) {
   hideSuggest();
   currentEntryTag = trade ? trade.entryTag ?? null : null;
   currentExitTag = trade ? trade.exitTag ?? null : null;
+  manageEntry = false;
+  manageExit = false;
   $("f-entry-note").value = trade && trade.entryNote ? trade.entryNote : "";
   $("f-exit-note").value = trade && trade.exitNote ? trade.exitNote : "";
   setSide(trade ? trade.side : "買");

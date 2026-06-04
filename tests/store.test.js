@@ -100,3 +100,44 @@ test("Store.addEntryTag / addExitTag: 重複と空白は無視・trimされる",
   assert.equal(s.addExitTag(" 利確 "), true); // trim される
   assert.deepEqual(s.getMaster().exitTags, ["既存", "利確"]);
 });
+
+test("Store.renameTag: 候補リストと既存取引のタグを同時に更新", () => {
+  const s = new Store();
+  s.setMaster({
+    version: 3,
+    trades: [
+      { id: "b1", date: "2026-01-01", code: "7203", side: "買", quantity: 100, price: 1000, entryTag: "旧名" },
+      { id: "b2", date: "2026-01-02", code: "6758", side: "買", quantity: 100, price: 2000, entryTag: "別" },
+    ],
+    deletedIds: {},
+    entryTags: ["旧名", "別"],
+    exitTags: ["既存"],
+  });
+  assert.equal(s.renameTag("entry", "旧名", " 新名 "), true); // trim される
+  assert.deepEqual(s.getMaster().entryTags, ["新名", "別"]);
+  assert.equal(s.getMaster().trades[0].entryTag, "新名"); // 取引も追従
+  assert.ok(s.getMaster().trades[0].updatedAt > 0); // 同期に乗るよう更新
+  assert.equal(s.getMaster().trades[1].entryTag, "別"); // 無関係は不変
+});
+
+test("Store.renameTag: 改名先が既存なら重複を作らず統合", () => {
+  const s = new Store();
+  s.setMaster({ version: 3, trades: [], deletedIds: {}, entryTags: ["A", "B"], exitTags: ["x"] });
+  assert.equal(s.renameTag("entry", "A", "B"), true);
+  assert.deepEqual(s.getMaster().entryTags, ["B"]); // 重複しない
+});
+
+test("Store.deleteTag: 候補から外すが既存取引のタグ値は残す（非破壊）", () => {
+  const s = new Store();
+  s.setMaster({
+    version: 3,
+    trades: [{ id: "s1", date: "2026-01-01", code: "7203", side: "売", quantity: 100, price: 1300, exitTag: "損切り" }],
+    deletedIds: {},
+    entryTags: ["a"],
+    exitTags: ["損切り", "利確"],
+  });
+  assert.equal(s.deleteTag("exit", "損切り"), true);
+  assert.deepEqual(s.getMaster().exitTags, ["利確"]); // 候補からは消える
+  assert.equal(s.getMaster().trades[0].exitTag, "損切り"); // 取引の記録は残る
+  assert.equal(s.deleteTag("exit", "無い"), false); // 無いものは false
+});

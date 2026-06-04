@@ -196,6 +196,13 @@ td.muted { color: #b0b0b5; }
   border: 1px solid #d8d8dd; border-radius: 16px; padding: 7px 13px; cursor: pointer; }
 .tag-chip.active { background: #e9f0ff; color: #0a64d6; border-color: #b9d2ff; }
 .tag-chip.add { color: var(--blue); border-style: dashed; }
+.tag-chip.manage-toggle { color: #8a8a8e; }
+.tag-chip.done { color: var(--gain); border-color: #b6e0c4; background: #eaf6ee; }
+/* 管理モード: タグ＋改名/削除の小ボタン */
+.tag-chip.manage { display: inline-flex; align-items: center; gap: 6px; color: #5b5b60; cursor: default; }
+.tag-mini { border: 0; background: transparent; cursor: pointer; font-size: 13px; line-height: 1;
+  padding: 2px 3px; color: #8a8a8e; }
+.tag-mini.del { color: var(--loss); font-size: 16px; }
 
 /* 取引履歴のタグ badge / 客観スナップショット */
 .trade-tag { display: inline-block; font-size: 11px; font-weight: 600; color: #5b5b60;
