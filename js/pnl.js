@@ -373,7 +373,8 @@ export function calcKpis(trades, year) {
 // 売り(実現損益)を、FIFOで消費した買いロットの「エントリー根拠タグ」へ遡って帰属させる。
 // 損益自体は平均法（calcRealized の records.pnl）だが、型別に割り当てるため株数比で按分する。
 // 1回買って1回で売る運用では 1売り＝1エントリーで全額が1タグに乗る（厳密一致）。
-// 戻り値: [{ sellTradeId, entryTag, qty, pnlShare }]
+// 戻り値: [{ sellTradeId, entryTag, qty, pnlShare, code, entryDate }]
+//   code/entryDate は帰属先の買いロットのもの（客観スナップショット引き当て用）。
 export function entryTagAttribution(trades) {
   const { records } = calcRealized(trades);
   const pnlBySell = new Map(); // sellTradeId -> 実現損益
@@ -401,7 +402,7 @@ export function entryTagAttribution(trades) {
     if (!lots[code]) lots[code] = [];
 
     if (tr.side === "買") {
-      lots[code].push({ qty: Number(tr.quantity), entryTag: tr.entryTag ?? null });
+      lots[code].push({ qty: Number(tr.quantity), entryTag: tr.entryTag ?? null, code, date: tr.date });
     } else if (tr.side === "売") {
       const totalPnl = pnlBySell.get(tr.id);
       const soldQty = qtyBySell.get(tr.id);
@@ -416,6 +417,8 @@ export function entryTagAttribution(trades) {
           entryTag: lot.entryTag,
           qty: take,
           pnlShare: totalPnl * (take / soldQty),
+          code: lot.code,
+          entryDate: lot.date,
         });
         lot.qty -= take;
         remaining -= take;
@@ -429,7 +432,8 @@ export function entryTagAttribution(trades) {
 // タグ別の損益ユニット配列 [{ key, pnl }] を成績行へ集計する純粋関数。
 // 戻り値: [{ tag, count, winningCount, losingCount, winRate, avgWin, avgLoss, expectancy, totalPnl }]
 //   合計損益の大きい順。key が空(null/未設定)は「（未設定）」へまとめる。
-function summarizeUnits(units) {
+//   タグ別・客観バケット別（app側で算出したkey）どちらの集計にも使える共通ヘルパー。
+export function summarize(units) {
   const map = new Map();
   for (const u of units) {
     const key = u.key == null || u.key === "" ? "（未設定）" : u.key;
@@ -465,11 +469,11 @@ export function tagBreakdown(trades, axis) {
     const { records } = calcRealized(trades);
     const exitTagById = new Map(trades.map((t) => [t.id, t.exitTag ?? null]));
     const units = records.map((r) => ({ key: exitTagById.get(r.tradeId), pnl: r.pnl }));
-    return summarizeUnits(units);
+    return summarize(units);
   }
   if (axis === "entry") {
     const units = entryTagAttribution(trades).map((a) => ({ key: a.entryTag, pnl: a.pnlShare }));
-    return summarizeUnits(units);
+    return summarize(units);
   }
   throw new Error(`unknown axis: ${axis}`);
 }

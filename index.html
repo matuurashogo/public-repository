@@ -73,10 +73,19 @@
   <!-- エントリー型別成績 -->
   <section class="card">
     <div class="card-title">エントリー型別成績</div>
-    <div class="seg" id="tag-axis" role="group" aria-label="型別成績の軸切替">
-      <button data-tagaxis="entry" class="active" aria-pressed="true">入口タグ別</button>
-      <button data-tagaxis="exit" aria-pressed="false">出口タグ別</button>
-    </div>
+    <label class="bd-axis-label">集計軸
+      <select id="tag-axis" aria-label="型別成績の集計軸">
+        <optgroup label="主観（自己申告タグ）">
+          <option value="entry">入口タグ別</option>
+          <option value="exit">出口タグ別</option>
+        </optgroup>
+        <optgroup label="客観（データ・要監視リスト）">
+          <option value="dip">凹みの深さ別</option>
+          <option value="vol">出来高急増別</option>
+          <option value="trend">トレンド位置別</option>
+        </optgroup>
+      </select>
+    </label>
     <div class="table-scroll">
       <table id="tag-breakdown-table">
         <thead></thead>

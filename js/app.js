@@ -9,7 +9,8 @@ import {
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
-import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown } from "./pnl.js";
+import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize } from "./pnl.js";
+import { prefetchIndicators, getSnapshot, bucketOf } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 
@@ -28,6 +29,14 @@ const $ = (id) => document.getElementById(id);
 // 1日の約定代金合計から算出するため、必ずこの単一経路を通す。
 function tradesForCalc() {
   return withMatsuiFees(store.getTrades(), MATSUI_BOX_RATE);
+}
+
+// 買い銘柄の客観スナップショットを必要分だけ先読みし、完了後に再描画する。
+async function refreshIndicators() {
+  const codes = store.getTrades().filter((t) => t.side === "買").map((t) => t.code);
+  await prefetchIndicators(codes);
+  renderTagBreakdown();
+  renderList(tradesForCalc(), calcRealized(tradesForCalc()).records);
 }
 
 // ---------- 表示ユーティリティ ----------
@@ -70,19 +79,65 @@ function renderAll() {
   renderList(trades, records);
 }
 
+// 軸ごとの 見出し列名 / 補足注記
+const AXIS_LABEL = {
+  entry: "入口タグ",
+  exit: "出口タグ",
+  dip: "凹みの深さ",
+  vol: "出来高",
+  trend: "トレンド位置",
+};
+const AXIS_NOTE = {
+  entry: "入口タグ別。売却損益をFIFOで買いロットへ遡って集計（1対1は厳密、分割は株数按分）。",
+  exit: "出口タグ別。各売却の実現損益をそのまま集計。",
+  dip: "客観：買い日付時点の25日線乖離（凹みの深さ）別。",
+  vol: "客観：買い日付時点の出来高（20日平均比）別。",
+  trend: "客観：買い日付時点の75日線に対する位置別。",
+};
+
+// 客観軸（dip/vol/trend）の集計。買いロットのスナップショットでバケット分けし、欠損は除外。
+// 戻り値: { rows, noData }
+function objectiveBreakdown(axis) {
+  const units = [];
+  let noData = 0;
+  for (const a of entryTagAttribution(tradesForCalc())) {
+    const snap = getSnapshot(a.code, a.entryDate);
+    const key = bucketOf(axis, snap);
+    if (!key) {
+      noData += 1;
+      continue;
+    }
+    units.push({ key, pnl: a.pnlShare });
+  }
+  return { rows: summarize(units), noData };
+}
+
 // ---------- エントリー型別成績 ----------
 function renderTagBreakdown() {
-  const rows = tagBreakdown(tradesForCalc(), tagAxis).filter((r) => r.count > 0);
-  const isEntry = tagAxis === "entry";
+  const isTag = tagAxis === "entry" || tagAxis === "exit";
+  let rows;
+  let noData = 0;
+  if (isTag) {
+    rows = tagBreakdown(tradesForCalc(), tagAxis);
+  } else {
+    const res = objectiveBreakdown(tagAxis);
+    rows = res.rows;
+    noData = res.noData;
+  }
+  rows = rows.filter((r) => r.count > 0);
+
   const thead = $("tag-breakdown-table").querySelector("thead");
   const tbody = $("tag-breakdown-table").querySelector("tbody");
   const note = $("tag-breakdown-note");
 
   thead.innerHTML =
-    `<tr><th>${isEntry ? "入口タグ" : "出口タグ"}</th><th>回数</th><th>勝率</th><th>平均利益/損失</th><th>合計</th></tr>`;
+    `<tr><th>${AXIS_LABEL[tagAxis]}</th><th>回数</th><th>勝率</th><th>平均利益/損失</th><th>合計</th></tr>`;
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${isEntry ? "売却の記録がまだありません" : "売却の記録がまだありません"}</td></tr>`;
+    const msg = isTag
+      ? "売却の記録がまだありません"
+      : "客観データのある売却がまだありません（監視リストに銘柄を追加すると表示）";
+    tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${msg}</td></tr>`;
     note.textContent = "";
     return;
   }
@@ -102,9 +157,8 @@ function renderTagBreakdown() {
     })
     .join("");
 
-  note.textContent = isEntry
-    ? "入口タグ別。売却損益をFIFOで買いロットへ遡って集計（1対1は厳密、分割は株数按分）。"
-    : "出口タグ別。各売却の実現損益をそのまま集計。";
+  const noDataNote = noData > 0 ? ` ／ スナップショット無し ${noData}件は除外（監視リスト未登録など）。` : "";
+  note.textContent = AXIS_NOTE[tagAxis] + noDataNote;
 }
 
 // ---------- タグchip（入力フォーム）----------
@@ -377,10 +431,15 @@ function renderList(trades, records) {
       const label = `${name} ${t.code}`;
       const rtag = isSell ? t.exitTag : t.entryTag;
       const tagBadge = rtag ? `<div class="trade-tag">${esc(rtag)}</div>` : "";
+      // 買いは、その日の客観スナップショット（取得済みなら）を併記
+      const snap = !isSell ? getSnapshot(t.code, t.date) : null;
+      const snapLine = snap
+        ? `<div class="trade-snap">データ: ${formatPct(snap.dev)}・${snap.abv ? "75日線上" : "75日線下"}・出来高${snap.vol.toFixed(1)}倍</div>`
+        : "";
       return (
         `<div class="trade">` +
         `<div class="left"><div class="name">${name}<span class="code">${esc(t.code)}</span>${nisa}</div>` +
-        `<div class="meta">${esc(t.date.replace(/-/g, "/"))} ・ ${esc(t.quantity)}株 @${price}${fee}</div>${tagBadge}</div>` +
+        `<div class="meta">${esc(t.date.replace(/-/g, "/"))} ・ ${esc(t.quantity)}株 @${price}${fee}</div>${tagBadge}${snapLine}</div>` +
         `<div class="right">${right}` +
         `<span class="badge ${isSell ? "sell" : "buy"}">${t.side}</span>` +
         `<span class="row-actions">` +
@@ -439,6 +498,7 @@ async function syncFromDrive() {
       await saveMaster(store.getMaster());
     }
     renderAll();
+    refreshIndicators();
     setSync("ok", "保存済み");
     $("signin-bar").classList.add("hidden");
   } catch (e) {
@@ -605,6 +665,7 @@ function onSubmit(ev) {
   closeForm();
   renderAll();
   saveToDrive();
+  refreshIndicators(); // 新しい買い銘柄のスナップショットを取りに行く
 }
 
 // ---------- イベント結線 ----------
@@ -637,16 +698,9 @@ function wireEvents() {
   $("entry-tags").addEventListener("click", onTagChipClick);
   $("exit-tags").addEventListener("click", onTagChipClick);
 
-  // 型別成績の軸切替（入口タグ別 / 出口タグ別）
-  $("tag-axis").addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-tagaxis]");
-    if (!btn) return;
-    tagAxis = btn.dataset.tagaxis;
-    for (const b of $("tag-axis").querySelectorAll("button")) {
-      const on = b === btn;
-      b.classList.toggle("active", on);
-      b.setAttribute("aria-pressed", on ? "true" : "false");
-    }
+  // 型別成績の軸切替（主観タグ / 客観スナップショット）
+  $("tag-axis").addEventListener("change", (e) => {
+    tagAxis = e.target.value;
     renderTagBreakdown();
   });
 
@@ -735,6 +789,7 @@ async function init() {
   wireEvents();
   renderTagChips();
   renderAll();
+  refreshIndicators(); // 客観スナップショットは取得でき次第あとから反映
   if (isConfigured()) {
     $("signin-note").textContent =
       "いまはこの端末に保存したデータを表示しています。上のボタンをタップすると Google Drive の最新と同期します。";
