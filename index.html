@@ -70,6 +70,41 @@
     <p id="kpi-empty" class="kpi-empty hidden">今年の売却がまだありません。売却を記録すると成績が表示されます。</p>
   </section>
 
+  <!-- エントリー型別成績 -->
+  <section class="card">
+    <div class="card-title">エントリー型別成績</div>
+    <label class="bd-axis-label">集計軸
+      <select id="tag-axis" aria-label="型別成績の集計軸">
+        <optgroup label="主観（自己申告タグ）">
+          <option value="entry">入口タグ別</option>
+          <option value="exit">出口タグ別</option>
+        </optgroup>
+        <optgroup label="客観（データ・要監視リスト）">
+          <option value="dip">凹みの深さ別</option>
+          <option value="vol">出来高急増別</option>
+          <option value="trend">トレンド位置別</option>
+          <option value="rsi">RSI（売られすぎ度）別</option>
+          <option value="hv">ボラティリティ別</option>
+        </optgroup>
+      </select>
+    </label>
+    <div class="table-scroll">
+      <table id="tag-breakdown-table">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p id="tag-breakdown-note" class="summary-note"></p>
+  </section>
+
+  <!-- 客観データ未取得の銘柄（監視リスト不足の案内） -->
+  <section class="card" id="missing-card" hidden>
+    <div class="card-title">客観データ未取得の銘柄</div>
+    <p class="summary-note" id="missing-note"></p>
+    <div id="missing-list" class="missing-list"></div>
+    <button type="button" id="missing-copy" class="btn-ghost missing-copy">コードをコピー</button>
+  </section>
+
   <!-- 累積損益グラフ -->
   <section class="card">
     <div class="card-title">累積損益の推移</div>
@@ -108,6 +143,19 @@
         <button type="button" data-acct="NISA" aria-pressed="false">NISA（非課税）</button>
       </div>
       <p class="field-hint">手数料は松井ボックスレートで自動計算（1日の約定代金合計で判定・50万円/日まで0円。NISAは無料）。</p>
+
+      <!-- エントリー/手仕舞い根拠（売買で出し分け） -->
+      <div id="entry-rationale" class="rationale">
+        <span class="field-label">エントリー根拠（押し目の型）</span>
+        <div class="tag-chips" id="entry-tags" role="group" aria-label="エントリー根拠タグ"></div>
+        <label>メモ<textarea id="f-entry-note" rows="2" placeholder="なぜ買ったか（任意）"></textarea></label>
+      </div>
+      <div id="exit-rationale" class="rationale" hidden>
+        <span class="field-label">手仕舞い根拠</span>
+        <div class="tag-chips" id="exit-tags" role="group" aria-label="手仕舞い根拠タグ"></div>
+        <label>メモ<textarea id="f-exit-note" rows="2" placeholder="なぜ売ったか（任意）"></textarea></label>
+      </div>
+
       <div class="form-actions">
         <button type="button" id="form-cancel" class="btn-ghost">キャンセル</button>
         <button type="submit" id="form-submit" class="btn-primary">追加する</button>

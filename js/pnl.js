@@ -370,6 +370,114 @@ export function calcKpis(trades, year) {
   };
 }
 
+// 売り(実現損益)を、FIFOで消費した買いロットの「エントリー根拠タグ」へ遡って帰属させる。
+// 損益自体は平均法（calcRealized の records.pnl）だが、型別に割り当てるため株数比で按分する。
+// 1回買って1回で売る運用では 1売り＝1エントリーで全額が1タグに乗る（厳密一致）。
+// 戻り値: [{ sellTradeId, entryTag, qty, pnlShare, code, entryDate }]
+//   code/entryDate は帰属先の買いロットのもの（客観スナップショット引き当て用）。
+export function entryTagAttribution(trades) {
+  const { records } = calcRealized(trades);
+  const pnlBySell = new Map(); // sellTradeId -> 実現損益
+  const qtyBySell = new Map(); // sellTradeId -> 約定株数（保有上限でキャップ済み）
+  for (const r of records) {
+    pnlBySell.set(r.tradeId, r.pnl);
+    qtyBySell.set(r.tradeId, r.quantity);
+  }
+
+  // calcRealized / holdingDaysBySell と同じ「約定日順・同日は入力順」で突き合わせる
+  const sorted = trades
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => {
+      if (a.t.date < b.t.date) return -1;
+      if (a.t.date > b.t.date) return 1;
+      return a.i - b.i;
+    })
+    .map((x) => x.t);
+
+  const lots = {}; // code -> [{ qty, entryTag }]（古い順の待ち行列）
+  const out = [];
+
+  for (const tr of sorted) {
+    const code = String(tr.code);
+    if (!lots[code]) lots[code] = [];
+
+    if (tr.side === "買") {
+      lots[code].push({ qty: Number(tr.quantity), entryTag: tr.entryTag ?? null, code, date: tr.date });
+    } else if (tr.side === "売") {
+      const totalPnl = pnlBySell.get(tr.id);
+      const soldQty = qtyBySell.get(tr.id);
+      if (totalPnl === undefined || !(soldQty > 0)) continue; // 記録の無い売り（保有0等）はスキップ
+      let remaining = soldQty;
+      const queue = lots[code];
+      while (remaining > 0 && queue.length > 0) {
+        const lot = queue[0];
+        const take = Math.min(remaining, lot.qty);
+        out.push({
+          sellTradeId: tr.id,
+          entryTag: lot.entryTag,
+          qty: take,
+          pnlShare: totalPnl * (take / soldQty),
+          code: lot.code,
+          entryDate: lot.date,
+        });
+        lot.qty -= take;
+        remaining -= take;
+        if (lot.qty === 0) queue.shift();
+      }
+    }
+  }
+  return out;
+}
+
+// タグ別の損益ユニット配列 [{ key, pnl }] を成績行へ集計する純粋関数。
+// 戻り値: [{ tag, count, winningCount, losingCount, winRate, avgWin, avgLoss, expectancy, totalPnl }]
+//   合計損益の大きい順。key が空(null/未設定)は「（未設定）」へまとめる。
+//   タグ別・客観バケット別（app側で算出したkey）どちらの集計にも使える共通ヘルパー。
+export function summarize(units) {
+  const map = new Map();
+  for (const u of units) {
+    const key = u.key == null || u.key === "" ? "（未設定）" : u.key;
+    const g = map.get(key) || { tag: key, count: 0, totalPnl: 0, wins: [], losses: [] };
+    g.count += 1;
+    g.totalPnl += u.pnl;
+    if (u.pnl > 0) g.wins.push(u.pnl);
+    else if (u.pnl < 0) g.losses.push(u.pnl);
+    map.set(key, g);
+  }
+  const rows = [];
+  for (const g of map.values()) {
+    rows.push({
+      tag: g.tag,
+      count: g.count,
+      winningCount: g.wins.length,
+      losingCount: g.losses.length,
+      winRate: g.count > 0 ? g.wins.length / g.count : null,
+      avgWin: mean(g.wins),
+      avgLoss: mean(g.losses),
+      expectancy: g.count > 0 ? g.totalPnl / g.count : null,
+      totalPnl: g.totalPnl,
+    });
+  }
+  rows.sort((a, b) => b.totalPnl - a.totalPnl);
+  return rows;
+}
+
+// 型別成績を集計する。axis="entry"（入口タグ別・FIFO遡及）/ "exit"（出口タグ別・売りを直接集計）。
+// 指標定義は calcKpis と整合（勝率=勝÷全, 期待値=合計÷件数）。全期間を対象とする。
+export function tagBreakdown(trades, axis) {
+  if (axis === "exit") {
+    const { records } = calcRealized(trades);
+    const exitTagById = new Map(trades.map((t) => [t.id, t.exitTag ?? null]));
+    const units = records.map((r) => ({ key: exitTagById.get(r.tradeId), pnl: r.pnl }));
+    return summarize(units);
+  }
+  if (axis === "entry") {
+    const units = entryTagAttribution(trades).map((a) => ({ key: a.entryTag, pnl: a.pnlShare }));
+    return summarize(units);
+  }
+  throw new Error(`unknown axis: ${axis}`);
+}
+
 // 損益配列を「0を中心に左右対称な等幅ビン」へ振り分ける純粋関数（ヒストグラム用）。
 // 最大絶対損益を span とし、[-span, +span] を binCount 等分する。
 // 戻り値: [{ lo, hi, mid, count, sign("loss"|"gain") }]（空入力は []）

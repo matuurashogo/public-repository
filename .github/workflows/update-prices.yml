@@ -49,19 +49,24 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install pyarrow
-        run: pip install --quiet pyarrow
+      - name: Install pyarrow / pandas
+        run: pip install --quiet pyarrow pandas
 
       - name: Generate latest_prices.json
         env:
           JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
         run: python tools/gen_prices.py
 
+      - name: Generate エントリー指標スナップショット（監視リスト銘柄）
+        env:
+          JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
+        run: python tools/gen_indicators.py
+
       - name: Bump service worker cache version if prices changed
         run: |
           set -euo pipefail
-          if git diff --quiet -- data/latest_prices.json; then
-            echo "価格に変更なし（休市日など）。コミットしません。"
+          if git diff --quiet -- data/latest_prices.json data/indicators; then
+            echo "価格・指標に変更なし（休市日など）。コミットしません。"
             echo "changed=false" >> "$GITHUB_ENV"
             exit 0
           fi
@@ -79,8 +84,8 @@ jobs:
           date=$(python -c "import json;print(json.load(open('data/latest_prices.json'))['date'])")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/latest_prices.json sw.js
-          git commit -m "最新終値を更新（基準日 ${date}）"
+          git add data/latest_prices.json data/indicators sw.js
+          git commit -m "最新終値・エントリー指標を更新（基準日 ${date}）"
           git push
 
       - name: Clean up

@@ -1,12 +1,13 @@
 // Service Worker: アプリシェルをキャッシュしオフライン閲覧を可能にする。
 // データの正は Google Drive。ここがキャッシュするのはアプリのコードと銘柄リストのみ。
-const CACHE = "tradebook-shell-v16";
+const CACHE = "tradebook-shell-v21";
 const ASSETS = [
   "./index.html",
   "./css/style.css",
   "./js/app.js",
   "./js/pnl.js",
   "./js/store.js",
+  "./js/indicators.js",
   "./js/drive.js",
   "./js/stocks.js",
   "./js/prices.js",
@@ -39,6 +40,19 @@ self.addEventListener("fetch", (e) => {
   // 最新終値はネットワーク優先（オンライン時は最新を取得、失敗時はキャッシュへフォールバック）。
   // 日次で更新されるため、SW再インストールを待たずに新しい価格を反映できる。
   if (url.pathname.endsWith("/data/latest_prices.json")) {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+          return res;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+  // エントリー・スナップショットの指標JSONはネットワーク優先＋取得分をキャッシュ（オフライン保険）。
+  if (url.pathname.includes("/data/indicators/")) {
     e.respondWith(
       fetch(e.request)
         .then((res) => {

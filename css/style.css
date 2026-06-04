@@ -183,3 +183,53 @@ td.muted { color: #b0b0b5; }
 .row-actions button { border: 0; background: transparent; font-size: 16px; cursor: pointer; padding: 4px; color: #b0b0b5; }
 .empty-note { text-align: center; color: #b0b0b5; padding: 16px 0 4px; font-size: 13px; line-height: 1.6; }
 .empty-note.hidden { display: none; }
+
+/* エントリー/手仕舞い根拠（フォーム） */
+.form-card textarea { font-size: 15px; padding: 11px 12px; border: 1px solid #d8d8dd; border-radius: 10px;
+  background: #fafafa; font-family: inherit; resize: vertical; }
+.form-card textarea:focus { outline: none; border-color: var(--blue); background: #fff; }
+.rationale { display: flex; flex-direction: column; gap: 8px; background: #fafafa;
+  border: 1px solid #ececf0; border-radius: 10px; padding: 12px; }
+.rationale[hidden] { display: none; }
+.tag-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.tag-chip { font-size: 13px; font-weight: 600; color: #6a6a6e; background: #fff;
+  border: 1px solid #d8d8dd; border-radius: 16px; padding: 7px 13px; cursor: pointer; }
+.tag-chip.active { background: #e9f0ff; color: #0a64d6; border-color: #b9d2ff; }
+.tag-chip.add { color: var(--blue); border-style: dashed; }
+.tag-chip.manage-toggle { color: #8a8a8e; }
+.tag-chip.done { color: var(--gain); border-color: #b6e0c4; background: #eaf6ee; }
+/* 管理モード: タグ＋改名/削除の小ボタン */
+.tag-chip.manage { display: inline-flex; align-items: center; gap: 6px; color: #5b5b60; cursor: default; }
+.tag-mini { border: 0; background: transparent; cursor: pointer; font-size: 13px; line-height: 1;
+  padding: 2px 3px; color: #8a8a8e; }
+.tag-mini.del { color: var(--loss); font-size: 16px; }
+
+/* 取引履歴のタグ badge / 客観スナップショット */
+.trade-tag { display: inline-block; font-size: 11px; font-weight: 600; color: #5b5b60;
+  background: #f0f0f3; border-radius: 6px; padding: 2px 8px; margin-top: 5px; }
+.trade-snap { font-size: 11px; color: #8a8a8e; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+/* 客観データ未取得の銘柄カード */
+.missing-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+.missing-chip { display: inline-flex; align-items: baseline; gap: 6px; font-size: 13px; font-weight: 600;
+  color: #5b5b60; background: #f0f0f3; border-radius: 8px; padding: 6px 10px; }
+.missing-chip .missing-code { color: #b0b0b5; font-weight: 500; font-size: 11px; font-variant-numeric: tabular-nums; }
+.missing-copy { width: 100%; }
+
+/* 型別成績の集計軸セレクト */
+.bd-axis-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+  color: #6a6a6e; font-weight: 600; margin-bottom: 14px; }
+.bd-axis-label select { font-size: 15px; padding: 10px 12px; border: 1px solid #d8d8dd;
+  border-radius: 10px; background: #fafafa; color: #1c1c1e; }
+.bd-axis-label select:focus { outline: none; border-color: var(--blue); background: #fff; }
+
+/* エントリー型別成績テーブル */
+#tag-breakdown-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#tag-breakdown-table th { text-align: right; font-size: 11px; color: #8a8a8e; font-weight: 600;
+  padding: 6px 8px; border-bottom: 1px solid #ececf0; white-space: nowrap; }
+#tag-breakdown-table th:first-child { text-align: left; }
+#tag-breakdown-table td { text-align: right; padding: 9px 8px; border-bottom: 1px solid #f4f4f6;
+  font-variant-numeric: tabular-nums; vertical-align: top; }
+#tag-breakdown-table td:first-child { text-align: left; font-weight: 600; }
+#tag-breakdown-table .table-empty { text-align: center; color: #b0b0b5; padding: 14px 0; }
+.bd-sub { font-size: 11px; color: #8a8a8e; margin-top: 2px; }

@@ -9,7 +9,8 @@ import {
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
-import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized } from "./pnl.js";
+import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize } from "./pnl.js";
+import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 
@@ -18,6 +19,11 @@ let axis = "month"; // year | month | code
 let editingId = null;
 let currentSide = "買";
 let currentAccount = "特定"; // 特定 | NISA
+let currentEntryTag = null; // フォームで選択中のエントリー根拠タグ
+let currentExitTag = null; // フォームで選択中の手仕舞い根拠タグ
+let manageEntry = false; // エントリータグの管理モード（改名・削除）
+let manageExit = false; // 手仕舞いタグの管理モード
+let tagAxis = "entry"; // 型別成績の軸: entry | exit
 
 const $ = (id) => document.getElementById(id);
 
@@ -25,6 +31,45 @@ const $ = (id) => document.getElementById(id);
 // 1日の約定代金合計から算出するため、必ずこの単一経路を通す。
 function tradesForCalc() {
   return withMatsuiFees(store.getTrades(), MATSUI_BOX_RATE);
+}
+
+// 買い銘柄の客観スナップショットを必要分だけ先読みし、完了後に再描画する。
+async function refreshIndicators() {
+  const codes = store.getTrades().filter((t) => t.side === "買").map((t) => t.code);
+  await prefetchIndicators(codes);
+  renderTagBreakdown();
+  renderMissingIndicators();
+  renderList(tradesForCalc(), calcRealized(tradesForCalc()).records);
+}
+
+// 取引したが客観データ未取得（監視リスト外など）の銘柄を一覧表示し、追加を案内する。
+// 取得が確定した銘柄のみ判定するため、先読み完了前は何も出さない（誤検出を防ぐ）。
+function renderMissingIndicators() {
+  const seen = new Set();
+  const missing = [];
+  for (const t of store.getTrades()) {
+    if (t.side !== "買") continue;
+    const code = String(t.code);
+    if (seen.has(code)) continue;
+    seen.add(code);
+    if (indicatorStatus(code) === "missing") {
+      missing.push({ code, name: codeToName(code) || "（名称未登録）" });
+    }
+  }
+
+  const card = $("missing-card");
+  if (missing.length === 0) {
+    card.hidden = true;
+    return;
+  }
+  missing.sort((a, b) => (a.code < b.code ? -1 : 1));
+  $("missing-note").textContent =
+    `${missing.length}銘柄は客観スナップショットがありません。下のコードを data/indicators_universe.json の codes に追加すると、次回のデータ更新から表示されます。`;
+  $("missing-list").innerHTML = missing
+    .map((m) => `<span class="missing-chip">${esc(m.name)}<span class="missing-code">${esc(m.code)}</span></span>`)
+    .join("");
+  // 監視リストへ貼り付けやすい形（"7011", "9501"）でコピーできるよう data 属性に持たせる
+  $("missing-copy").dataset.codes = missing.map((m) => `"${m.code}"`).join(", ");
 }
 
 // ---------- 表示ユーティリティ ----------
@@ -62,8 +107,198 @@ function renderAll() {
   renderSummary(records);
   renderHoldings(holdings);
   renderKpis();
+  renderTagBreakdown();
+  renderMissingIndicators();
   renderCumulative($("cum-chart"), records);
   renderList(trades, records);
+}
+
+// 軸ごとの 見出し列名 / 補足注記
+const AXIS_LABEL = {
+  entry: "入口タグ",
+  exit: "出口タグ",
+  dip: "凹みの深さ",
+  vol: "出来高",
+  trend: "トレンド位置",
+  rsi: "RSI",
+  hv: "ボラティリティ",
+};
+const AXIS_NOTE = {
+  entry: "入口タグ別。売却損益をFIFOで買いロットへ遡って集計（1対1は厳密、分割は株数按分）。",
+  exit: "出口タグ別。各売却の実現損益をそのまま集計。",
+  dip: "客観：買い日付時点の25日線乖離（凹みの深さ）別。",
+  vol: "客観：買い日付時点の出来高（20日平均比）別。",
+  trend: "客観：買い日付時点の75日線に対する位置別。",
+  rsi: "客観：買い日付時点のRSI(14)（売られすぎ度）別。",
+  hv: "客観：買い日付時点の年率ヒストリカル・ボラティリティ別。",
+};
+
+// 客観軸（dip/vol/trend）の集計。買いロットのスナップショットでバケット分けし、欠損は除外。
+// 戻り値: { rows, noData }
+function objectiveBreakdown(axis) {
+  const units = [];
+  let noData = 0;
+  for (const a of entryTagAttribution(tradesForCalc())) {
+    const snap = getSnapshot(a.code, a.entryDate);
+    const key = bucketOf(axis, snap);
+    if (!key) {
+      noData += 1;
+      continue;
+    }
+    units.push({ key, pnl: a.pnlShare });
+  }
+  return { rows: summarize(units), noData };
+}
+
+// ---------- エントリー型別成績 ----------
+function renderTagBreakdown() {
+  const isTag = tagAxis === "entry" || tagAxis === "exit";
+  let rows;
+  let noData = 0;
+  if (isTag) {
+    rows = tagBreakdown(tradesForCalc(), tagAxis);
+  } else {
+    const res = objectiveBreakdown(tagAxis);
+    rows = res.rows;
+    noData = res.noData;
+  }
+  rows = rows.filter((r) => r.count > 0);
+
+  const thead = $("tag-breakdown-table").querySelector("thead");
+  const tbody = $("tag-breakdown-table").querySelector("tbody");
+  const note = $("tag-breakdown-note");
+
+  thead.innerHTML =
+    `<tr><th>${AXIS_LABEL[tagAxis]}</th><th>回数</th><th>勝率</th><th>平均利益/損失</th><th>合計</th></tr>`;
+
+  if (rows.length === 0) {
+    const msg = isTag
+      ? "売却の記録がまだありません"
+      : "客観データのある売却がまだありません（監視リストに銘柄を追加すると表示）";
+    tbody.innerHTML = `<tr><td colspan="5" class="table-empty">${msg}</td></tr>`;
+    note.textContent = "";
+    return;
+  }
+
+  const pct = (v) => (v === null ? "—" : (v * 100).toFixed(0) + "%");
+  tbody.innerHTML = rows
+    .map((r) => {
+      const avgWin = r.avgWin === null ? "—" : formatYen(r.avgWin);
+      const avgLoss = r.avgLoss === null ? "—" : formatYen(r.avgLoss);
+      return (
+        `<tr><td>${esc(r.tag)}</td>` +
+        `<td>${r.count}回<div class="bd-sub">${r.winningCount}勝${r.losingCount}敗</div></td>` +
+        `<td>${pct(r.winRate)}</td>` +
+        `<td><span class="gain">${avgWin}</span> / <span class="loss">${avgLoss}</span></td>` +
+        `<td class="${gainLossClass(r.totalPnl)}">${formatYen(r.totalPnl)}</td></tr>`
+      );
+    })
+    .join("");
+
+  const noDataNote = noData > 0 ? ` ／ スナップショット無し ${noData}件は除外（監視リスト未登録など）。` : "";
+  note.textContent = AXIS_NOTE[tagAxis] + noDataNote;
+}
+
+// ---------- タグchip（入力フォーム）----------
+function renderTagChips() {
+  const m = store.getMaster();
+  $("entry-tags").innerHTML = chipsHtml(m.entryTags, currentEntryTag, "entry");
+  $("exit-tags").innerHTML = chipsHtml(m.exitTags, currentExitTag, "exit");
+}
+function chipsHtml(tags, selected, kind) {
+  const manage = kind === "entry" ? manageEntry : manageExit;
+  const chips = (tags || []).map((t) => {
+    if (manage) {
+      return (
+        `<span class="tag-chip manage">${esc(t)}` +
+        `<button type="button" class="tag-mini" data-rename="${esc(t)}" data-kind="${kind}" aria-label="${esc(t)} を改名">✎</button>` +
+        `<button type="button" class="tag-mini del" data-delete="${esc(t)}" data-kind="${kind}" aria-label="${esc(t)} を削除">×</button>` +
+        `</span>`
+      );
+    }
+    const on = t === selected;
+    return (
+      `<button type="button" class="tag-chip${on ? " active" : ""}" ` +
+      `data-tag="${esc(t)}" data-kind="${kind}" aria-pressed="${on ? "true" : "false"}">${esc(t)}</button>`
+    );
+  });
+  if (manage) {
+    chips.push(`<button type="button" class="tag-chip done" data-managedone="${kind}">完了</button>`);
+  } else {
+    chips.push(`<button type="button" class="tag-chip add" data-add="${kind}">＋新規</button>`);
+    chips.push(`<button type="button" class="tag-chip manage-toggle" data-manage="${kind}">管理</button>`);
+  }
+  return chips.join("");
+}
+
+// chip のタップ: ＋新規/管理/完了/改名/削除/選択トグルを振り分ける
+function onTagChipClick(e) {
+  const addBtn = e.target.closest("button[data-add]");
+  if (addBtn) return addTagPrompt(addBtn.dataset.add);
+
+  const manageBtn = e.target.closest("button[data-manage]");
+  if (manageBtn) return setManage(manageBtn.dataset.manage, true);
+
+  const doneBtn = e.target.closest("button[data-managedone]");
+  if (doneBtn) return setManage(doneBtn.dataset.managedone, false);
+
+  const renBtn = e.target.closest("button[data-rename]");
+  if (renBtn) return renameTagPrompt(renBtn.dataset.kind, renBtn.dataset.rename);
+
+  const delBtn = e.target.closest("button[data-delete]");
+  if (delBtn) return deleteTagConfirm(delBtn.dataset.kind, delBtn.dataset.delete);
+
+  const chip = e.target.closest("button[data-tag]");
+  if (!chip) return;
+  const tag = chip.dataset.tag;
+  if (chip.dataset.kind === "entry") {
+    currentEntryTag = currentEntryTag === tag ? null : tag;
+  } else {
+    currentExitTag = currentExitTag === tag ? null : tag;
+  }
+  renderTagChips();
+}
+
+// 管理モードの開始/終了
+function setManage(kind, on) {
+  if (kind === "entry") manageEntry = on;
+  else manageExit = on;
+  renderTagChips();
+}
+
+// タグの改名（候補リストと既存取引・選択中タグを追従）
+function renameTagPrompt(kind, oldName) {
+  const next = window.prompt("タグの新しい名前", oldName);
+  if (next == null) return;
+  const to = next.trim();
+  if (!to || to === oldName) return;
+  if (!store.renameTag(kind, oldName, to)) return;
+  if (kind === "entry" && currentEntryTag === oldName) currentEntryTag = to;
+  if (kind === "exit" && currentExitTag === oldName) currentExitTag = to;
+  renderTagChips();
+  renderAll(); // 取引履歴・型別成績のタグ表示を更新
+  saveToDrive();
+}
+
+// タグの削除（候補から外すのみ。過去取引の記録は残す）
+function deleteTagConfirm(kind, name) {
+  if (!window.confirm(`タグ「${name}」を候補から削除しますか？\n（過去の取引に付いた記録はそのまま残ります）`)) return;
+  if (!store.deleteTag(kind, name)) return;
+  if (kind === "entry" && currentEntryTag === name) currentEntryTag = null;
+  if (kind === "exit" && currentExitTag === name) currentExitTag = null;
+  renderTagChips();
+  saveToDrive();
+}
+
+// 新規タグを追加（iOS Safari でも使える prompt）。追加後はそのタグを選択状態にする。
+function addTagPrompt(kind) {
+  const name = (window.prompt(kind === "entry" ? "新しいエントリー根拠タグ" : "新しい手仕舞い根拠タグ") || "").trim();
+  if (!name) return;
+  const added = kind === "entry" ? store.addEntryTag(name) : store.addExitTag(name);
+  if (kind === "entry") currentEntryTag = name;
+  else currentExitTag = name;
+  renderTagChips();
+  if (added) saveToDrive();
 }
 
 // 保有銘柄カード: 銘柄 / 保有数 / 平均取得単価 / 現在値 / 評価額 / 含み損益（評価額の大きい順）。
@@ -287,10 +522,17 @@ function renderList(trades, records) {
       const nisa = t.account === "NISA" ? `<span class="acct-tag">NISA</span>` : "";
       const fee = Number(t.fee) > 0 ? ` ・ 手数料${Number(t.fee).toLocaleString("ja-JP")}` : "";
       const label = `${name} ${t.code}`;
+      const rtag = isSell ? t.exitTag : t.entryTag;
+      const tagBadge = rtag ? `<div class="trade-tag">${esc(rtag)}</div>` : "";
+      // 買いは、その日の客観スナップショット（取得済みなら）を併記
+      const snap = !isSell ? getSnapshot(t.code, t.date) : null;
+      const snapLine = snap
+        ? `<div class="trade-snap">データ: ${formatPct(snap.dev)}・${snap.abv ? "75日線上" : "75日線下"}・出来高${snap.vol.toFixed(1)}倍</div>`
+        : "";
       return (
         `<div class="trade">` +
         `<div class="left"><div class="name">${name}<span class="code">${esc(t.code)}</span>${nisa}</div>` +
-        `<div class="meta">${esc(t.date.replace(/-/g, "/"))} ・ ${esc(t.quantity)}株 @${price}${fee}</div></div>` +
+        `<div class="meta">${esc(t.date.replace(/-/g, "/"))} ・ ${esc(t.quantity)}株 @${price}${fee}</div>${tagBadge}${snapLine}</div>` +
         `<div class="right">${right}` +
         `<span class="badge ${isSell ? "sell" : "buy"}">${t.side}</span>` +
         `<span class="row-actions">` +
@@ -349,6 +591,7 @@ async function syncFromDrive() {
       await saveMaster(store.getMaster());
     }
     renderAll();
+    refreshIndicators();
     setSync("ok", "保存済み");
     $("signin-bar").classList.add("hidden");
   } catch (e) {
@@ -375,8 +618,15 @@ function openForm(trade) {
   $("f-price").value = trade ? trade.price : "";
   $("f-search").value = "";
   hideSuggest();
+  currentEntryTag = trade ? trade.entryTag ?? null : null;
+  currentExitTag = trade ? trade.exitTag ?? null : null;
+  manageEntry = false;
+  manageExit = false;
+  $("f-entry-note").value = trade && trade.entryNote ? trade.entryNote : "";
+  $("f-exit-note").value = trade && trade.exitNote ? trade.exitNote : "";
   setSide(trade ? trade.side : "買");
   setAccount(trade ? trade.account || "特定" : "特定");
+  renderTagChips();
   updateNamePreview();
   $("form-card").hidden = false;
   $("add-toggle").hidden = true;
@@ -396,6 +646,9 @@ function setSide(side) {
     b.setAttribute("aria-pressed", on ? "true" : "false");
   }
   updateHoldingsPicker();
+  // 根拠ブロックを売買で出し分ける（買い=エントリー / 売り=手仕舞い）
+  $("entry-rationale").hidden = side !== "買";
+  $("exit-rationale").hidden = side !== "売";
 }
 function setAccount(acct) {
   currentAccount = acct;
@@ -490,11 +743,24 @@ function onSubmit(ev) {
   }
   // 手数料は松井ボックスレートで自動算出するため、ここでは保持しない
   const trade = { date, code, side: currentSide, quantity, price, account: currentAccount };
+  // 売買に応じて根拠を載せ、反対側のフィールドは null で揃える（編集時の混入防止）
+  if (currentSide === "買") {
+    trade.entryTag = currentEntryTag;
+    trade.entryNote = $("f-entry-note").value.trim() || null;
+    trade.exitTag = null;
+    trade.exitNote = null;
+  } else {
+    trade.exitTag = currentExitTag;
+    trade.exitNote = $("f-exit-note").value.trim() || null;
+    trade.entryTag = null;
+    trade.entryNote = null;
+  }
   if (editingId) store.updateTrade(editingId, trade);
   else store.addTrade(trade);
   closeForm();
   renderAll();
   saveToDrive();
+  refreshIndicators(); // 新しい買い銘柄のスナップショットを取りに行く
 }
 
 // ---------- イベント結線 ----------
@@ -521,6 +787,31 @@ function wireEvents() {
   $("f-account").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-acct]");
     if (b) setAccount(b.dataset.acct);
+  });
+
+  // タグchip（選択トグル / ＋新規）
+  $("entry-tags").addEventListener("click", onTagChipClick);
+  $("exit-tags").addEventListener("click", onTagChipClick);
+
+  // 型別成績の軸切替（主観タグ / 客観スナップショット）
+  $("tag-axis").addEventListener("change", (e) => {
+    tagAxis = e.target.value;
+    renderTagBreakdown();
+  });
+
+  // 未取得銘柄コードのコピー（監視リストへ貼り付けやすい形式）
+  $("missing-copy").addEventListener("click", async (e) => {
+    const text = e.currentTarget.dataset.codes || "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      e.currentTarget.textContent = "コピーしました";
+      setTimeout(() => (e.currentTarget.textContent = "コードをコピー"), 1500);
+    } catch (err) {
+      console.warn("クリップボードへのコピーに失敗:", err);
+      e.currentTarget.textContent = "コピーできませんでした";
+      setTimeout(() => (e.currentTarget.textContent = "コードをコピー"), 1500);
+    }
   });
 
   // 銘柄サジェスト
@@ -606,7 +897,9 @@ async function init() {
   await Promise.all([loadStocks(), loadPrices()]);
   store.loadCache(); // 直近のキャッシュを表示（オフライン/未サインインでも閲覧可）
   wireEvents();
+  renderTagChips();
   renderAll();
+  refreshIndicators(); // 客観スナップショットは取得でき次第あとから反映
   if (isConfigured()) {
     $("signin-note").textContent =
       "いまはこの端末に保存したデータを表示しています。上のボタンをタップすると Google Drive の最新と同期します。";
