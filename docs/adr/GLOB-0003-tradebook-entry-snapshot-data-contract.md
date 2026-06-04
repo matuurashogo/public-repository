@@ -4,10 +4,10 @@
 
 | 項目 | 値 |
 |------|---|
-| **Status** | `Accepted` |
+| **Status** | `Superseded` |
 | **Date** | 2026-06-04 |
 | **Supersedes** | — |
-| **Superseded by** | — |
+| **Superseded by** | `GLOB-0004`（rows に rsi/hv を追加してスキーマ拡張） |
 
 ## ❓ コンテキスト（背景と課題）
 

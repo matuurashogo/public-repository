@@ -39,6 +39,11 @@ class TestComputePayloads(unittest.TestCase):
         self.assertTrue(last["abv"])
         # tv20 = (19*1000 + 3000)/20 = 1100 → vol = 3000/1100 = 2.7273
         self.assertAlmostEqual(last["vol"], 2.73, places=2)
+        # 直近14本の差分は 0×13 と +20 のみ（下げ無し）→ avg_loss=0 → RSI=100
+        self.assertEqual(last["rsi"], 100.0)
+        # HV は有限の正の値（log收益率の20日σ×√250）
+        self.assertIsInstance(last["hv"], float)
+        self.assertGreater(last["hv"], 0.0)
 
         # payload メタ
         self.assertEqual(payloads["9999"]["code"], "9999")

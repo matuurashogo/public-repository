@@ -10,6 +10,8 @@
   - dev  : 25日線乖離率 = adj_close / ma25 - 1          （凹みの深さ）
   - abv  : 75日線の上か = adj_close > ma75               （トレンド位置）
   - vol  : 売買代金 / 20日平均売買代金                    （出来高急増度）
+  - rsi  : RSI(14)（単純移動平均版）                      （売られすぎ度）
+  - hv   : 年率ヒストリカル・ボラティリティ = 日次log收益率の20日σ × √250  （ボラティリティ）
 
 全約3,800銘柄を毎日コミットすると git 履歴が肥大化するため、対象は監視リスト方式で限定する
 （ADR: エントリー・スナップショットのデータ契約を参照）。
@@ -23,8 +25,8 @@ jquants-data の場所は次の優先順で自動検出する（環境変数 JQU
     "code": "7203",
     "updated": "2026-06-03",
     "source": "jquants-data prices (VolDipSignals指標と同一定義)",
-    "rows": [ {"d": "2024-06-04", "dev": -0.0123, "abv": true, "vol": 1.42}, ... ]   # 日付昇順
-  }
+    "rows": [ {"d": "2024-06-04", "dev": -0.0123, "abv": true, "vol": 1.42, "rsi": 48.2, "hv": 0.243}, ... ]
+  }   # rows は日付昇順
 
 使い方:
     python tools/gen_indicators.py
@@ -50,10 +52,27 @@ OUT_DIR = PUBLIC_ROOT / "data" / "indicators"
 MA_SHORT = 25
 MA_LONG = 75
 TV_WINDOW = 20
+RSI_PERIOD = 14
+HV_WINDOW = 20
+ANNUALIZE = 250.0 ** 0.5
 # 出力する直近営業日数（約2年）と、75日線のウォームアップ込みで読む入力営業日数
 OUTPUT_DAYS = 500
 WARMUP = MA_LONG + TV_WINDOW + 5
 INPUT_DAYS = OUTPUT_DAYS + WARMUP
+
+
+def _rsi(close, period: int = RSI_PERIOD):
+    """終値ベースの RSI（単純移動平均版）。VolDipSignals の _rsi と同一。"""
+    import numpy as np
+
+    delta = close.diff()
+    gain = delta.clip(lower=0.0)
+    loss = -delta.clip(upper=0.0)
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+    rs = avg_gain / avg_loss.replace(0.0, np.nan)
+    rsi = 100.0 - 100.0 / (1.0 + rs)
+    return rsi.where(avg_loss != 0.0, 100.0)  # 下げ無し区間は RSI=100
 
 _CANDIDATE_JQUANTS_REPOS = [
     os.environ.get("JQUANTS_PARQUET_REPO", ""),
@@ -125,6 +144,7 @@ def _load_panel(prices_dir: str, universe: set[str]):
 
 def compute_payloads(panel) -> dict:
     """長形式の株価 DataFrame から code4 -> payload(dict) を計算する純粋関数（テスト対象）。"""
+    import numpy as np
     import pandas as pd
 
     if panel is None or len(panel) == 0:
@@ -145,22 +165,28 @@ def compute_payloads(panel) -> dict:
     panel["dev"] = panel["adj_close"] / panel["ma25"] - 1.0
     panel["abv"] = panel["adj_close"] > panel["ma75"]
     panel["vol"] = panel["trading_value"] / panel["tv20"]
+    panel["rsi"] = g.transform(lambda s: _rsi(s, RSI_PERIOD))
+    logret = g.transform(lambda s: np.log(s).diff())
+    panel["hv"] = logret.groupby(panel["code4"], sort=False).transform(
+        lambda s: s.rolling(HV_WINDOW).std()
+    ) * ANNUALIZE
 
     out: dict[str, dict] = {}
     for code4, sub in panel.groupby("code4", sort=True):
-        sub = sub.dropna(subset=["dev", "ma75", "tv20", "vol"])
+        sub = sub.dropna(subset=["dev", "ma75", "tv20", "vol", "rsi", "hv"])
         if sub.empty:
             continue
         sub = sub.tail(OUTPUT_DAYS)
         rows = []
         for _, r in sub.iterrows():
-            vol = float(r["vol"])
             rows.append(
                 {
                     "d": r["date"].strftime("%Y-%m-%d"),
                     "dev": round(float(r["dev"]), 4),
                     "abv": bool(r["abv"]),
-                    "vol": round(vol, 2),
+                    "vol": round(float(r["vol"]), 2),
+                    "rsi": round(float(r["rsi"]), 1),
+                    "hv": round(float(r["hv"]), 3),
                 }
             )
         out[code4] = {

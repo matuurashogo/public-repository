@@ -62,7 +62,7 @@ export function lookupSnapshot(rows, date) {
   }
   if (ans < 0) return null; // 期間より前（上場前など）
   const r = rows[ans];
-  return { dev: r.dev, abv: r.abv, vol: r.vol, date: r.d };
+  return { dev: r.dev, abv: r.abv, vol: r.vol, rsi: r.rsi, hv: r.hv, date: r.d };
 }
 
 // 買い日付(YYYY-MM-DD)時点のスナップショットを返す。
@@ -75,6 +75,7 @@ export function getSnapshot(code, date) {
 
 // スナップショットを客観軸のバケット名へ写像する（純粋）。閾値は設計の叩き台。
 //   axis: "dip"（凹みの深さ）/ "vol"（出来高急増）/ "trend"（トレンド位置）
+//         "rsi"（売られすぎ度）/ "hv"（年率ボラティリティ）
 export function bucketOf(axis, snap) {
   if (!snap) return null;
   if (axis === "dip") {
@@ -87,6 +88,18 @@ export function bucketOf(axis, snap) {
   }
   if (axis === "trend") {
     return snap.abv ? "上昇トレンド（75日線上）" : "下降局面（75日線下）";
+  }
+  if (axis === "rsi") {
+    if (snap.rsi == null) return null;
+    if (snap.rsi <= 30) return "売られすぎ（≤30）";
+    if (snap.rsi <= 50) return "中立（30〜50）";
+    return "強め（>50）";
+  }
+  if (axis === "hv") {
+    if (snap.hv == null) return null;
+    if (snap.hv < 0.2) return "低ボラ（<20%）";
+    if (snap.hv < 0.4) return "中ボラ（20〜40%）";
+    return "高ボラ（≥40%）";
   }
   return null;
 }
