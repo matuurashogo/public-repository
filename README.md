@@ -70,6 +70,35 @@ python TradeBook/tools/test_gen_indicators.py
 取引済みなのに客観データが無い銘柄は、アプリ上の「**客観データ未取得の銘柄**」カードに一覧表示され、コピーボタンで
 `indicators_universe.json` の `codes` へ貼り付けやすい形（`"7011", "9501"`）でコピーできます。
 
+### 監視リストの自動同期（任意・全自動運用）
+
+`tools/sync_universe_from_drive.py` を使うと、**Google Drive の取引マスター（`TradeBook_master.json`）で
+売買している銘柄を、監視リストへ自動で追記**できます。日次ワークフロー（`.github/workflows/update-prices.yml`）が
+`gen_indicators.py` の前にこれを実行するため、設定すると「**銘柄を買う → 翌営業日には客観スナップショットが
+自動で出る**」まで全自動になります（手動で `indicators_universe.json` を編集する必要がなくなる）。
+
+Drive の取引ファイルはアプリ専用スコープ（`drive.file`）で作られ CI から直接は読めないため、
+**サービスアカウント（SA）にファイルを共有**して読みます。一度きりの設定手順:
+
+1. [Google Cloud Console](https://console.cloud.google.com/) で **Google Drive API** を有効化。
+2. 「IAMと管理」→「サービスアカウント」で SA を作成し、**JSONキー**を発行（ダウンロード）。
+3. Drive で `TradeBook_master.json` を開き、「共有」から **SA のメールアドレス**（`xxx@yyy.iam.gserviceaccount.com`）を
+   **閲覧者**で追加。
+4. GitHub リポジトリの Secrets に登録:
+   - `GDRIVE_SA_JSON`: 発行した JSONキーの中身そのもの（base64 でも可）
+   - `TRADEBOOK_DRIVE_FILE_ID`: 取引マスターのファイルID（Drive の共有URL `.../d/<ここ>/view` の部分）
+
+Secret が未設定の場合は同期ステップは**スキップ**され、従来どおり監視リストは手動運用になります（後方互換）。
+監視リストに乗るのは**4桁コードのみ**で、取引価格・数量などの機微情報はコミットされません。
+
+手元での実行（テスト）:
+
+```bash
+GDRIVE_SA_JSON="$(cat service-account.json)" \
+TRADEBOOK_DRIVE_FILE_ID="<ファイルID>" \
+python tools/sync_universe_from_drive.py
+```
+
 ### 銘柄名リストについて
 
 `data/stocks.json` はコード→名称対応（約3,800銘柄）。主データは `JQuantsExtractor/data/subsector_master.jsonl`（約2,200銘柄）で、これに加えて兄弟ディレクトリに [`jquants-data`](https://github.com/matuurashogo/jquants-data) リポジトリがあれば、その `full/sector33_*.parquet` の `company` 列（ほぼ全上場銘柄の社名）から**主データに無い銘柄名のみ**を補完します（`pyarrow` 必須・任意依存。場所は環境変数 `JQUANTS_PARQUET_REPO` で指定可）。補完は追加のみで既存の名称は上書きしません。なお未収録コードは名称が空欄になります（記録・計算自体は可能）。
