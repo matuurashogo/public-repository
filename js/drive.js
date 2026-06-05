@@ -5,9 +5,11 @@
 import { CONFIG } from "./config.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
+const TOKEN_KEY = "tb_drive_token"; // localStorage: { access_token, expiry(ms) }
 
 let _tokenClient = null;
 let _accessToken = null;
+let _tokenExpiry = 0; // アクセストークンの失効時刻(ms)。0なら未取得
 let _fileId = null; // マスターファイルのDrive上のID（判明後にキャッシュ）
 let _knownModifiedTime = null; // 最後に読み書きしたサーバ側の modifiedTime（衝突検出用）
 
@@ -19,8 +21,55 @@ export function isConfigured() {
   );
 }
 
+// 有効な（未失効の）アクセストークンを保持しているか
 export function isSignedIn() {
-  return !!_accessToken;
+  return !!_accessToken && _tokenExpiry > Date.now();
+}
+
+// 取得したトークンをメモリ + localStorage に保存する。
+// expiresInSec は GIS が返す有効期間(秒)。60秒の安全マージンを引いて失効扱いにする。
+function persistToken(token, expiresInSec) {
+  _accessToken = token;
+  const ttl = Number(expiresInSec) > 0 ? Number(expiresInSec) : 3000;
+  _tokenExpiry = Date.now() + Math.max(0, ttl - 60) * 1000;
+  try {
+    localStorage.setItem(
+      TOKEN_KEY,
+      JSON.stringify({ access_token: token, expiry: _tokenExpiry })
+    );
+  } catch (_) {
+    // ストレージ不可（プライベートモード等）でもメモリ上では当該セッション中は動作する
+  }
+}
+
+// トークンを破棄する（失効検出時・サインアウト相当）。
+function clearToken() {
+  _accessToken = null;
+  _tokenExpiry = 0;
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch (_) {
+    /* noop */
+  }
+}
+
+// localStorage に有効なトークンが残っていればメモリへ復元する。
+// PWA をいったん閉じても、失効までは無操作で同期できるようにするための起動時フック。
+export function restoreToken() {
+  try {
+    const raw = localStorage.getItem(TOKEN_KEY);
+    if (!raw) return false;
+    const { access_token, expiry } = JSON.parse(raw);
+    if (access_token && typeof expiry === "number" && expiry > Date.now()) {
+      _accessToken = access_token;
+      _tokenExpiry = expiry;
+      return true;
+    }
+  } catch (_) {
+    /* 壊れた値は破棄する */
+  }
+  clearToken();
+  return false;
 }
 
 // GIS のトークンクライアントを初期化（gsi/client ロード後に呼ぶ）
@@ -49,7 +98,7 @@ export function signIn() {
     }
     client.callback = (resp) => {
       if (resp && resp.access_token) {
-        _accessToken = resp.access_token;
+        persistToken(resp.access_token, resp.expires_in);
         resolve(_accessToken);
       } else {
         reject(new Error("アクセストークンを取得できませんでした。"));
@@ -98,7 +147,7 @@ export async function signInSilent(timeoutMs = 8000) {
     );
     client.callback = (resp) => {
       if (resp && resp.access_token) {
-        _accessToken = resp.access_token;
+        persistToken(resp.access_token, resp.expires_in);
         finish(resolve, _accessToken);
       } else {
         finish(reject, new Error("トークンを取得できませんでした。"));
@@ -114,6 +163,30 @@ function authHeaders() {
   return { Authorization: `Bearer ${_accessToken}` };
 }
 
+// Drive REST 共通フェッチ。Authorization を付与し、401（トークン失効）が返ったら
+// トークンを破棄してサイレント再認証を1回だけ試み、成功すれば同じリクエストを再送する。
+// サイレント再認証が失敗した場合（iOSのITP等）はトークン未保持のまま応答を返すので、
+// 呼び出し側で isSignedIn() を見て手動サインインへフォールバックする。
+async function driveFetch(url, opts = {}) {
+  const build = () => ({
+    ...opts,
+    headers: { ...(opts.headers || {}), ...authHeaders() },
+  });
+  let res = await fetch(url, build());
+  if (res.status === 401) {
+    clearToken();
+    try {
+      await signInSilent(5000);
+    } catch (_) {
+      /* 再認証不可。呼び出し側でハンドリングする */
+    }
+    if (_accessToken) {
+      res = await fetch(url, build());
+    }
+  }
+  return res;
+}
+
 // マスターファイルのIDを検索（無ければ null）。modifiedTime を更新日時として保持する。
 // 同名ファイルが複数ある場合（split-brain）は最終更新が最も新しいものを採用する。
 async function findMasterFileId() {
@@ -123,7 +196,7 @@ async function findMasterFileId() {
   const url =
     `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive` +
     `&orderBy=modifiedTime desc&fields=files(id,name,modifiedTime)`;
-  const res = await fetch(url, { headers: authHeaders() });
+  const res = await driveFetch(url);
   if (!res.ok) throw new Error(`Drive検索に失敗: ${res.status}`);
   const data = await res.json();
   if (data.files && data.files.length > 0) {
@@ -137,7 +210,7 @@ async function findMasterFileId() {
 // 現在のサーバ側 modifiedTime を取得する（保存前の衝突検出用）。
 async function fetchModifiedTime(id) {
   const url = `https://www.googleapis.com/drive/v3/files/${id}?fields=modifiedTime`;
-  const res = await fetch(url, { headers: authHeaders() });
+  const res = await driveFetch(url);
   if (!res.ok) throw new Error(`更新時刻の取得に失敗: ${res.status}`);
   const data = await res.json();
   return data.modifiedTime || null;
@@ -149,7 +222,7 @@ export async function loadMaster() {
   const id = await findMasterFileId();
   if (!id) return null;
   const url = `https://www.googleapis.com/drive/v3/files/${id}?alt=media`;
-  const res = await fetch(url, { headers: authHeaders() });
+  const res = await driveFetch(url);
   if (!res.ok) throw new Error(`マスター読込に失敗: ${res.status}`);
   return await res.json();
 }
@@ -181,9 +254,9 @@ export async function saveMaster(master) {
     }
     // 既存ファイルを更新（media）。更新後の modifiedTime を取得して保持する
     const url = `https://www.googleapis.com/upload/drive/v3/files/${_fileId}?uploadType=media&fields=id,modifiedTime`;
-    const res = await fetch(url, {
+    const res = await driveFetch(url, {
       method: "PATCH",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body,
     });
     if (!res.ok) throw new Error(`マスター更新に失敗: ${res.status}`);
@@ -206,10 +279,9 @@ export async function saveMaster(master) {
 
   const url =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime";
-  const res = await fetch(url, {
+  const res = await driveFetch(url, {
     method: "POST",
     headers: {
-      ...authHeaders(),
       "Content-Type": `multipart/related; boundary=${boundary}`,
     },
     body: multipart,

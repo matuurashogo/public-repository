@@ -4,6 +4,8 @@ import {
   isConfigured,
   isSignedIn,
   signIn,
+  signInSilent,
+  restoreToken,
   loadMaster,
   saveMaster,
 } from "./drive.js";
@@ -97,6 +99,12 @@ function setSync(state, text) {
   const el = $("sync");
   el.className = "sync" + (state ? " " + state : "");
   $("sync-text").textContent = text;
+}
+
+// セッション失効などでサインインが必要になったとき、サインインバーを再表示する。
+function showSigninBar(note) {
+  $("signin-bar").classList.remove("hidden");
+  if (note) $("signin-note").textContent = note;
 }
 
 // ---------- 描画 ----------
@@ -597,7 +605,13 @@ async function saveToDrive() {
       }
     }
     console.error(e);
-    setSync("error", "保存に失敗");
+    if (!isSignedIn()) {
+      // 401でトークンが破棄され、サイレント再認証も不可だった → 手動サインインへ誘導
+      setSync("error", "再サインインが必要");
+      showSigninBar("セッションの有効期限が切れました。もう一度サインインしてください。");
+    } else {
+      setSync("error", "保存に失敗");
+    }
   }
 }
 
@@ -620,7 +634,12 @@ async function syncFromDrive() {
     $("signin-bar").classList.add("hidden");
   } catch (e) {
     console.error(e);
-    setSync("error", "同期に失敗");
+    if (!isSignedIn()) {
+      setSync("error", "再サインインが必要");
+      showSigninBar("セッションの有効期限が切れました。もう一度サインインしてください。");
+    } else {
+      setSync("error", "同期に失敗");
+    }
   }
 }
 
@@ -924,16 +943,27 @@ async function init() {
   renderTagChips();
   renderAll();
   refreshIndicators(); // 客観スナップショットは取得でき次第あとから反映
-  if (isConfigured()) {
-    $("signin-note").textContent =
-      "いまはこの端末に保存したデータを表示しています。上のボタンをタップすると Google Drive の最新と同期します。";
-  } else {
+
+  if (!isConfigured()) {
     $("signin-note").textContent =
       "現在はローカル保存で動作中。クラウド同期を使うには README の手順で設定してください。";
+    setSync("", "未サインイン");
+  } else if (restoreToken()) {
+    // 保存済みアクセストークンが有効 → 無操作のまま同期（PWA再起動後もログイン維持）。
+    syncFromDrive();
+  } else {
+    // 有効なトークンが無い場合でも、Google側のセッションが生きていれば UI を出さずに
+    // 再取得できることがある（主にPC/通常タブ）。iOSのPWAではITPで失敗しうるが、
+    // その場合は静かにローカル表示へフォールバックする（従来どおりボタンで手動サインイン）。
+    setSync("busy", "サインイン状態を確認中…");
+    signInSilent(5000)
+      .then(() => syncFromDrive())
+      .catch(() => {
+        $("signin-note").textContent =
+          "いまはこの端末に保存したデータを表示しています。上のボタンをタップすると Google Drive の最新と同期します。";
+        setSync("", "ローカル表示中（タップで同期）");
+      });
   }
-  // iOS Safari/PWA では起動時のサイレント認証（ユーザー操作なしのトークン取得）が
-  // 自動ポップアップ抑止＋ITPにより成立しないため行わない。サインインはボタンのタップ起点とする。
-  setSync("", isConfigured() ? "ローカル表示中（タップで同期）" : "未サインイン");
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("SW登録失敗:", e));
