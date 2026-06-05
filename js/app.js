@@ -4,12 +4,14 @@ import {
   isConfigured,
   isSignedIn,
   signIn,
+  signInSilent,
+  restoreToken,
   loadMaster,
   saveMaster,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
-import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize } from "./pnl.js";
+import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize, accountMixWarnings } from "./pnl.js";
 import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
@@ -99,11 +101,18 @@ function setSync(state, text) {
   $("sync-text").textContent = text;
 }
 
+// セッション失効などでサインインが必要になったとき、サインインバーを再表示する。
+function showSigninBar(note) {
+  $("signin-bar").classList.remove("hidden");
+  if (note) $("signin-note").textContent = note;
+}
+
 // ---------- 描画 ----------
 function renderAll() {
   const trades = tradesForCalc();
   const { records, warnings, holdings } = calcRealized(trades);
-  renderWarnings(warnings);
+  // 計算時の警告（保有超過売却）＋データ全体の整合警告（口座混在の同時保有）を併せて表示
+  renderWarnings(warnings.concat(accountMixWarnings(trades)));
   renderSummary(records);
   renderHoldings(holdings);
   renderKpis();
@@ -597,7 +606,13 @@ async function saveToDrive() {
       }
     }
     console.error(e);
-    setSync("error", "保存に失敗");
+    if (!isSignedIn()) {
+      // 401でトークンが破棄され、サイレント再認証も不可だった → 手動サインインへ誘導
+      setSync("error", "再サインインが必要");
+      showSigninBar("セッションの有効期限が切れました。もう一度サインインしてください。");
+    } else {
+      setSync("error", "保存に失敗");
+    }
   }
 }
 
@@ -620,7 +635,12 @@ async function syncFromDrive() {
     $("signin-bar").classList.add("hidden");
   } catch (e) {
     console.error(e);
-    setSync("error", "同期に失敗");
+    if (!isSignedIn()) {
+      setSync("error", "再サインインが必要");
+      showSigninBar("セッションの有効期限が切れました。もう一度サインインしてください。");
+    } else {
+      setSync("error", "同期に失敗");
+    }
   }
 }
 
@@ -758,12 +778,62 @@ function updateHoldingsPicker() {
 function onSubmit(ev) {
   ev.preventDefault();
   const date = $("f-date").value;
-  const code = $("f-code").value.trim();
+  const code = $("f-code").value.trim().toUpperCase();
   const quantity = Number($("f-qty").value);
   const price = Number($("f-price").value);
-  if (!date || !/^\d{4}$/.test(code) || !(quantity > 0) || !(price >= 0)) {
-    alert("入力内容を確認してください（銘柄コードは4桁、数量は1以上）。");
+
+  // --- ブロック: 物理的にありえない入力は保存させない ---
+  const today = todayLocalISO();
+  const hard = [];
+  if (!date) hard.push("約定日が未入力です。");
+  else if (date > today) hard.push(`約定日が未来の日付（${date}）になっています。`);
+  if (!/^[0-9A-Z]{4}$/.test(code)) hard.push("銘柄コードは4桁（数字または英数字）で入力してください。");
+  if (!Number.isInteger(quantity) || quantity <= 0) hard.push("数量は1以上の整数で入力してください。");
+  if (!(price > 0)) hard.push("価格は0より大きい値で入力してください。");
+  if (hard.length) {
+    alert("入力を確認してください:\n\n・" + hard.join("\n・"));
     return;
+  }
+
+  // --- 確認: ありえるが怪しい入力（OKで強行可。手動入力ミスの大半はここで止める）---
+  const soft = [];
+  // 重複登録
+  const dup = store.getTrades().some(
+    (t) =>
+      t.id !== editingId &&
+      t.date === date &&
+      String(t.code) === code &&
+      t.side === currentSide &&
+      Number(t.quantity) === quantity &&
+      Number(t.price) === price
+  );
+  if (dup) soft.push("同じ内容（日付・コード・売買・数量・価格）の取引が既にあります。二重登録かもしれません。");
+  // 存在しない銘柄コード
+  if (!codeToName(code)) soft.push(`コード ${code} は銘柄リストに見つかりません。コード違いの可能性があります。`);
+  // 単元（100株の倍数でない）
+  if (quantity % 100 !== 0) soft.push(`数量 ${quantity} は100株の倍数ではありません。`);
+  // 桁違い価格（最新終値から±50%以上の乖離）
+  const mkt = Number(getPriceMap()[code]);
+  if (mkt > 0) {
+    const dev = Math.abs(price - mkt) / mkt;
+    if (dev >= 0.5)
+      soft.push(
+        `価格 ${price.toLocaleString()}円 は最新終値 ${Math.round(mkt).toLocaleString()}円 と${Math.round(dev * 100)}%乖離しています。桁違いかもしれません。`
+      );
+  }
+  // 保有を超える売却（買っていないのに売る／数量超過）。候補を反映して計算し直して判定。
+  if (currentSide === "売") {
+    const candidate = { id: editingId || "__candidate__", date, code, side: "売", quantity, price, account: currentAccount };
+    const prospective = editingId
+      ? store.getTrades().map((t) => (t.id === editingId ? { ...t, ...candidate } : t))
+      : store.getTrades().concat([candidate]);
+    const { warnings: w } = calcRealized(prospective);
+    if (w.some((m) => m.startsWith(`${date} ${code}:`)))
+      soft.push("この売却は保有数量を超えています（その時点で買い記録が足りない／買っていない可能性）。");
+  }
+  if (soft.length) {
+    const ok = confirm("⚠ 入力に気になる点があります:\n\n・" + soft.join("\n\n・") + "\n\nこのまま登録しますか？");
+    if (!ok) return;
   }
   // 手数料は松井ボックスレートで自動算出するため、ここでは保持しない
   const trade = { date, code, side: currentSide, quantity, price, account: currentAccount };
@@ -924,16 +994,27 @@ async function init() {
   renderTagChips();
   renderAll();
   refreshIndicators(); // 客観スナップショットは取得でき次第あとから反映
-  if (isConfigured()) {
-    $("signin-note").textContent =
-      "いまはこの端末に保存したデータを表示しています。上のボタンをタップすると Google Drive の最新と同期します。";
-  } else {
+
+  if (!isConfigured()) {
     $("signin-note").textContent =
       "現在はローカル保存で動作中。クラウド同期を使うには README の手順で設定してください。";
+    setSync("", "未サインイン");
+  } else if (restoreToken()) {
+    // 保存済みアクセストークンが有効 → 無操作のまま同期（PWA再起動後もログイン維持）。
+    syncFromDrive();
+  } else {
+    // 有効なトークンが無い場合でも、Google側のセッションが生きていれば UI を出さずに
+    // 再取得できることがある（主にPC/通常タブ）。iOSのPWAではITPで失敗しうるが、
+    // その場合は静かにローカル表示へフォールバックする（従来どおりボタンで手動サインイン）。
+    setSync("busy", "サインイン状態を確認中…");
+    signInSilent(5000)
+      .then(() => syncFromDrive())
+      .catch(() => {
+        $("signin-note").textContent =
+          "いまはこの端末に保存したデータを表示しています。上のボタンをタップすると Google Drive の最新と同期します。";
+        setSync("", "ローカル表示中（タップで同期）");
+      });
   }
-  // iOS Safari/PWA では起動時のサイレント認証（ユーザー操作なしのトークン取得）が
-  // 自動ポップアップ抑止＋ITPにより成立しないため行わない。サインインはボタンのタップ起点とする。
-  setSync("", isConfigured() ? "ローカル表示中（タップで同期）" : "未サインイン");
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("SW登録失敗:", e));

@@ -118,6 +118,38 @@ export function calcRealized(trades) {
   return { records, holdings, warnings };
 }
 
+// 口座をまたいだ同一銘柄の同時保有を検出して警告文の配列を返す。
+// calcRealized はコード単位で平均法消費するため、特定とNISAで同じ銘柄を同時に
+// 保有すると取得単価が口座を越えて混ざり、実現損益がずれる。その兆候を知らせる。
+export function accountMixWarnings(trades) {
+  const sorted = trades
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) =>
+      a.t.date < b.t.date ? -1 : a.t.date > b.t.date ? 1 : a.i - b.i
+    )
+    .map((x) => x.t);
+  const byCode = {}; // code -> { account: 保有数量 }
+  const flagged = new Set();
+  const warnings = [];
+  for (const tr of sorted) {
+    const code = String(tr.code);
+    const acct = tr.account || "特定";
+    const q = Number(tr.quantity) || 0;
+    const m = (byCode[code] = byCode[code] || {});
+    m[acct] = (m[acct] || 0) + (tr.side === "買" ? q : -q);
+    const held = Object.keys(m).filter((a) => (m[a] || 0) > 0);
+    if (held.length >= 2 && !flagged.has(code)) {
+      flagged.add(code);
+      warnings.push(
+        `${code}: 同一銘柄を複数口座（${held.join(
+          "・"
+        )}）で同時保有しています。取得単価が口座をまたいで混ざり、損益がずれる可能性があります。`
+      );
+    }
+  }
+  return warnings;
+}
+
 // 実現損益レコードを軸で集計する。
 // axis: "year" | "month" | "code"
 // 戻り値: [{ key, gross, taxable, tax, net }]
