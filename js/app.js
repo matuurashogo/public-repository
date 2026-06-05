@@ -453,7 +453,9 @@ function renderSummary(records) {
   hv.innerHTML = `${formatYen(hero.net)}<span class="yen">円</span>`;
   const hg = $("hero-gross");
   hg.className = "v " + gainLossClass(hero.gross);
-  hg.textContent = formatYen(hero.gross);
+  hg.innerHTML =
+    formatYen(hero.gross) +
+    (hero.rate != null ? ` <span class="rate">(${formatPct(hero.rate)})</span>` : "");
   $("hero-tax").textContent = hero.tax > 0 ? "−" + hero.tax.toLocaleString("ja-JP") : "0";
 
   // 集計表
@@ -484,15 +486,14 @@ function renderSummary(records) {
       if (axis === "code") label = `${esc(r.name || r.key)} <span style="color:#b0b0b5;font-size:11px">${esc(r.key)}</span>`;
       else if (axis === "year") label = esc(r.key) + "年";
       else label = esc(r.key.replace("-", "/"));
+      // 税引前損益のセルに損益率（取得原価ベース）を小さく併記する
+      const pctSub = r.rate != null ? `<div class="bd-sub">${formatPct(r.rate)}</div>` : "";
+      const grossCell = `<td class="${gainLossClass(r.gross)}">${formatYen(r.gross)}${pctSub}</td>`;
       if (!isYear) {
-        return (
-          `<tr><td>${label}</td>` +
-          `<td class="${gainLossClass(r.gross)}">${formatYen(r.gross)}</td></tr>`
-        );
+        return `<tr><td>${label}</td>${grossCell}</tr>`;
       }
       return (
-        `<tr><td>${label}</td>` +
-        `<td class="${gainLossClass(r.gross)}">${formatYen(r.gross)}</td>` +
+        `<tr><td>${label}</td>${grossCell}` +
         `<td>${r.tax > 0 ? r.tax.toLocaleString("ja-JP") : "0"}</td>` +
         `<td class="${gainLossClass(r.net)}">${formatYen(r.net)}</td></tr>`
       );
@@ -502,7 +503,11 @@ function renderSummary(records) {
 
 function renderList(trades, records) {
   const pnlById = {};
-  for (const r of records) pnlById[r.tradeId] = r.pnl;
+  const rateById = {};
+  for (const r of records) {
+    pnlById[r.tradeId] = r.pnl;
+    rateById[r.tradeId] = r.costBasis > 0 ? r.pnl / r.costBasis : null;
+  }
 
   const sorted = [...trades].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const list = $("trade-list");
@@ -513,9 +518,11 @@ function renderList(trades, records) {
       const name = esc(codeToName(t.code) || "（名称未登録）");
       const isSell = t.side === "売";
       const pnl = pnlById[t.id];
+      const rate = rateById[t.id];
+      const pctTag = rate != null ? ` <span class="rate">(${formatPct(rate)})</span>` : "";
       const right = isSell
         ? (pnl !== undefined
-            ? `<span class="pnl-tag ${gainLossClass(pnl)}">${formatYen(pnl)}</span>`
+            ? `<span class="pnl-tag ${gainLossClass(pnl)}">${formatYen(pnl)}${pctTag}</span>`
             : `<span class="pnl-tag muted">—</span>`)
         : `<span class="pnl-tag muted">買付</span>`;
       const price = Number(t.price).toLocaleString("ja-JP");

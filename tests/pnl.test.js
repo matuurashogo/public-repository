@@ -28,7 +28,40 @@ test("単純な買い→全部売り", () => {
   const { records, holdings } = calcRealized(trades);
   assert.equal(records.length, 1);
   assert.equal(records[0].pnl, 116600); // (3466-2300)*100
+  assert.equal(records[0].costBasis, 230000); // 2300*100（損益率の分母）
   assert.equal(holdings["7203"].quantity, 0);
+});
+
+test("損益率: record.costBasis と aggregate.rate（取得原価ベース・加重平均）", () => {
+  const trades = [
+    { id: "1", date: "2026-02-10", code: "6855", side: "買", quantity: 100, price: 7550 },
+    { id: "2", date: "2026-02-20", code: "6855", side: "売", quantity: 100, price: 8050 },
+  ];
+  const { records } = calcRealized(trades);
+  assert.equal(records[0].pnl, 50000);
+  assert.equal(records[0].costBasis, 755000);
+  // 損益率 = 50000 / 755000 = 0.0662...
+  assert.ok(Math.abs(records[0].pnl / records[0].costBasis - 0.06623) < 1e-4);
+
+  const year = aggregate(records, "year")[0];
+  assert.equal(year.cost, 755000);
+  assert.ok(Math.abs(year.rate - 0.06623) < 1e-4);
+});
+
+test("aggregate.rate: 取得原価合計に対する損益合計の加重平均（複数取引）", () => {
+  // 大きい取引(原価100万・+5万=+5%)と小さい取引(原価10万・-1万=-10%)
+  const trades = [
+    { id: "b1", date: "2026-01-05", code: "AAAA", side: "買", quantity: 100, price: 10000 },
+    { id: "s1", date: "2026-01-10", code: "AAAA", side: "売", quantity: 100, price: 10500 },
+    { id: "b2", date: "2026-01-06", code: "BBBB", side: "買", quantity: 100, price: 1000 },
+    { id: "s2", date: "2026-01-11", code: "BBBB", side: "売", quantity: 100, price: 900 },
+  ];
+  const { records } = calcRealized(trades);
+  const year = aggregate(records, "year")[0];
+  // gross = +50000 -10000 = 40000、cost = 1000000 + 100000 = 1100000
+  assert.equal(year.gross, 40000);
+  assert.equal(year.cost, 1100000);
+  assert.ok(Math.abs(year.rate - 40000 / 1100000) < 1e-9); // 約 +3.6%（単純平均-2.5%とは異なる）
 });
 
 test("買い増し→一部売却（平均法）", () => {

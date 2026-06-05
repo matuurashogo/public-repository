@@ -105,6 +105,7 @@ export function calcRealized(trades) {
           sellPrice: price,
           avgCost,
           pnl,
+          costBasis: avgCost * sellQty, // 取得原価（損益率の分母。avgCost は買い手数料込み）
           account: tr.account || "特定",
         });
         h.cost -= avgCost * sellQty;
@@ -127,15 +128,16 @@ export function calcRealized(trades) {
 // 注意: 申告分離課税は本来「年単位・全銘柄通算後のネット」にかかる。月別/銘柄別の
 //        tax はあくまで単独試算であり、実際の納税額ではない（呼び出し側で扱いを分ける）。
 export function aggregate(records, axis, nameResolver) {
-  const buckets = new Map(); // key -> { gross, taxable }
+  const buckets = new Map(); // key -> { gross, taxable, cost }
   for (const r of records) {
     let key;
     if (axis === "year") key = r.date.slice(0, 4);
     else if (axis === "month") key = r.date.slice(0, 7); // YYYY-MM
     else if (axis === "code") key = r.code;
     else throw new Error(`unknown axis: ${axis}`);
-    const b = buckets.get(key) || { gross: 0, taxable: 0 };
+    const b = buckets.get(key) || { gross: 0, taxable: 0, cost: 0 };
     b.gross += r.pnl;
+    b.cost += r.costBasis || 0; // 取得原価合計（損益率の分母）
     if ((r.account || "特定") === "特定") b.taxable += r.pnl; // NISAは課税対象外
     buckets.set(key, b);
   }
@@ -143,7 +145,9 @@ export function aggregate(records, axis, nameResolver) {
   const rows = [];
   for (const [key, b] of buckets.entries()) {
     const tax = estimateTax(b.taxable);
-    const row = { key, gross: b.gross, taxable: b.taxable, tax, net: b.gross - tax };
+    // 損益率は「損益合計 ÷ 取得原価合計」の加重平均（取得原価ベース・税引前）
+    const rate = b.cost > 0 ? b.gross / b.cost : null;
+    const row = { key, gross: b.gross, taxable: b.taxable, tax, net: b.gross - tax, cost: b.cost, rate };
     if (axis === "code" && typeof nameResolver === "function") {
       row.name = nameResolver(key);
     }
