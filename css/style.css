@@ -178,8 +178,10 @@ td.muted { color: #b0b0b5; }
 /* メタ/スナップは単位ごとに改行（数字の途中で割れないように） */
 .m-seg { white-space: nowrap; }
 .m-dot { color: #cdcdd2; margin: 0 5px; }
-/* 右カラム: バッジ＋操作を上段に固定し、損益を下段へ。行をまたいで「売/買」が揃う */
-.trade .right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+/* 右カラム: バッジ＋操作を上段に固定し、損益を下段へ。
+   幅を固定して、買い/売りで左カラム（銘柄名・コード）の折り返し位置を揃える */
+.trade .right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+                flex-shrink: 0; width: 130px; }
 .right-top { display: flex; align-items: center; gap: 6px; }
 .pnl-line { display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
 .badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 7px; }
