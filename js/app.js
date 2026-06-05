@@ -519,33 +519,50 @@ function renderList(trades, records) {
       const isSell = t.side === "売";
       const pnl = pnlById[t.id];
       const rate = rateById[t.id];
-      const pctTag = rate != null ? ` <span class="rate">(${formatPct(rate)})</span>` : "";
-      const right = isSell
-        ? (pnl !== undefined
-            ? `<span class="pnl-tag ${gainLossClass(pnl)}">${formatYen(pnl)}${pctTag}</span>`
-            : `<span class="pnl-tag muted">—</span>`)
-        : `<span class="pnl-tag muted">買付</span>`;
       const price = Number(t.price).toLocaleString("ja-JP");
       const nisa = t.account === "NISA" ? `<span class="acct-tag">NISA</span>` : "";
-      const fee = Number(t.fee) > 0 ? ` ・ 手数料${Number(t.fee).toLocaleString("ja-JP")}` : "";
       const label = `${name} ${t.code}`;
       const rtag = isSell ? t.exitTag : t.entryTag;
       const tagBadge = rtag ? `<div class="trade-tag">${esc(rtag)}</div>` : "";
+
+      // メタ情報は単語の途中で改行されないよう、セグメント単位（nowrap）で組み立てる
+      const dot = `<span class="m-dot">・</span>`;
+      const metaSegs = [esc(t.date.replace(/-/g, "/")), `${esc(t.quantity)}株 @${price}`];
+      if (Number(t.fee) > 0) metaSegs.push(`手数料${Number(t.fee).toLocaleString("ja-JP")}`);
+      const meta = metaSegs.map((s) => `<span class="m-seg">${s}</span>`).join(dot);
+
       // 買いは、その日の客観スナップショット（取得済みなら）を併記
       const snap = !isSell ? getSnapshot(t.code, t.date) : null;
       const snapLine = snap
-        ? `<div class="trade-snap">データ: ${formatPct(snap.dev)}・${snap.abv ? "75日線上" : "75日線下"}・出来高${snap.vol.toFixed(1)}倍</div>`
+        ? `<div class="trade-snap"><span class="m-seg">データ ${formatPct(snap.dev)}</span>${dot}` +
+          `<span class="m-seg">${snap.abv ? "75日線上" : "75日線下"}</span>${dot}` +
+          `<span class="m-seg">出来高${snap.vol.toFixed(1)}倍</span></div>`
         : "";
+
+      // 損益行は売却のみ表示（買いは右上の「買」バッジで足りるため金額行は出さない）
+      const pnlLine = isSell
+        ? `<div class="pnl-line">` +
+          (pnl !== undefined
+            ? `<span class="pnl-tag ${gainLossClass(pnl)}">${formatYen(pnl)}</span>` +
+              (rate != null ? `<span class="rate">(${formatPct(rate)})</span>` : "")
+            : `<span class="pnl-tag muted">—</span>`) +
+          `</div>`
+        : "";
+
       return (
         `<div class="trade">` +
-        `<div class="left"><div class="name">${name}<span class="code">${esc(t.code)}</span>${nisa}</div>` +
-        `<div class="meta">${esc(t.date.replace(/-/g, "/"))} ・ ${esc(t.quantity)}株 @${price}${fee}</div>${tagBadge}${snapLine}</div>` +
-        `<div class="right">${right}` +
+        `<div class="left">` +
+        `<div class="name">${name}<span class="code">${esc(t.code)}</span>${nisa}</div>` +
+        `<div class="meta">${meta}</div>${tagBadge}${snapLine}</div>` +
+        `<div class="right">` +
+        `<div class="right-top">` +
         `<span class="badge ${isSell ? "sell" : "buy"}">${t.side}</span>` +
         `<span class="row-actions">` +
         `<button data-edit="${t.id}" aria-label="${esc(label)} を編集">✏️</button>` +
         `<button data-del="${t.id}" aria-label="${esc(label)} を削除">🗑</button>` +
-        `</span></div></div>`
+        `</span></div>` +
+        pnlLine +
+        `</div></div>`
       );
     })
     .join("");
