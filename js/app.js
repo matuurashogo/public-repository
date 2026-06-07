@@ -10,6 +10,7 @@ import {
   saveMaster,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
+import { parseTradeText } from "./parse.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
 import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize, accountMixWarnings } from "./pnl.js";
 import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus } from "./indicators.js";
@@ -661,6 +662,8 @@ function openForm(trade) {
   $("f-qty").value = trade ? trade.quantity : "";
   $("f-price").value = trade ? trade.price : "";
   $("f-search").value = "";
+  $("f-paste").value = "";
+  $("f-paste-note").textContent = "";
   hideSuggest();
   currentEntryTag = trade ? trade.entryTag ?? null : null;
   currentExitTag = trade ? trade.exitTag ?? null : null;
@@ -705,6 +708,32 @@ function setAccount(acct) {
 function updateNamePreview() {
   const code = $("f-code").value.trim();
   $("f-name").textContent = code.length === 4 ? codeToName(code) || "（名称未登録）" : "";
+}
+
+// 約定テキストの解析結果をフォームへ流し込む。拾えた項目だけ反映し、
+// 何が入って何が未取得かを注記に出す（最終確認は人間が行う前提）。
+function applyParsed(p) {
+  const note = $("f-paste-note");
+  if (!p) {
+    note.textContent = "読み取れませんでした。フォーマットが違うかもしれません。手入力してください。";
+    return;
+  }
+  const got = [];
+  const miss = [];
+  if (p.date) { $("f-date").value = p.date; got.push("約定日"); } else miss.push("約定日");
+  if (p.code) {
+    $("f-code").value = String(p.code).toUpperCase().slice(0, 4);
+    updateNamePreview();
+    got.push("コード");
+  } else miss.push("コード");
+  if (p.side) { setSide(p.side); got.push("売買"); } else miss.push("売買");
+  if (p.quantity != null) { $("f-qty").value = p.quantity; got.push("数量"); } else miss.push("数量");
+  if (p.price != null) { $("f-price").value = p.price; got.push("単価"); } else miss.push("単価");
+  if (p.account) { setAccount(p.account); got.push("口座"); } else miss.push("口座");
+  note.textContent =
+    `自動入力: ${got.join("・") || "なし"}` +
+    (miss.length ? ` / 未取得（手入力してください）: ${miss.join("・")}` : "") +
+    "。内容を確認してから登録してください。";
 }
 
 // ---------- 銘柄サジェスト ----------
@@ -873,6 +902,12 @@ function wireEvents() {
   $("add-toggle").addEventListener("click", () => openForm(null));
   $("form-cancel").addEventListener("click", closeForm);
   $("trade-form").addEventListener("submit", onSubmit);
+
+  // 約定テキストの貼り付け→自動入力（ボタン押下と貼り付け時の両方で解析）
+  $("f-paste-btn").addEventListener("click", () => applyParsed(parseTradeText($("f-paste").value)));
+  $("f-paste").addEventListener("paste", () =>
+    setTimeout(() => applyParsed(parseTradeText($("f-paste").value)), 0)
+  );
   $("f-code").addEventListener("input", updateNamePreview);
   $("f-side").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-side]");

@@ -116,6 +116,13 @@
   <section class="card form-card" id="form-card" hidden>
     <div class="card-title" id="form-title">取引を追加</div>
     <form id="trade-form">
+      <div class="paste-import">
+        <label>約定テキストを貼り付け（任意）
+          <textarea id="f-paste" rows="2" placeholder="松井の「約定詳細」をLive Textでコピーして貼り付け → 自動入力"></textarea>
+        </label>
+        <button type="button" id="f-paste-btn" class="btn-ghost">解析して入力</button>
+        <p id="f-paste-note" class="field-hint"></p>
+      </div>
       <label>約定日<input type="date" id="f-date" required /></label>
       <label>銘柄を検索（社名・コード）
         <div class="suggest-wrap">
@@ -124,7 +131,7 @@
         </div>
       </label>
       <label>銘柄コード
-        <input type="text" id="f-code" inputmode="numeric" pattern="\d{4}" maxlength="4" placeholder="7203" required />
+        <input type="text" id="f-code" inputmode="numeric" pattern="[0-9A-Za-z]{4}" maxlength="4" placeholder="7203" required />
         <span id="f-name" class="f-name"></span>
       </label>
       <div class="side-toggle" id="f-side">
