@@ -606,14 +606,16 @@ function renderList(trades, records) {
       // 買いは、その日の客観スナップショット（取得済みなら）を併記
       const snap = !isSell ? entrySnapForBuy(t) : null;
       const snapLine = snap
-        ? `<div class="trade-snap"><span class="m-seg">データ ${formatPct(snap.dev)}</span>${dot}` +
+        ? `<div class="trade-snap"><span class="seg-label">客観</span>` +
+          `<span class="m-seg">乖離 ${formatPct(snap.dev)}</span>${dot}` +
           `<span class="m-seg">${snap.abv ? "75日線上" : "75日線下"}</span></div>`
         : "";
 
       // 買いは、約定後の結果を MFE/MAE に絞って併記（+5/+20日は分析用に保存・カードは要点のみ）。
       const oc = !isSell ? entryOutcomeForBuy(t) : null;
       const outcomeLine = oc
-        ? `<div class="trade-outcome"><span class="m-seg"><span class="gain">MFE ${formatPct(oc.mfe)}</span> / ` +
+        ? `<div class="trade-outcome"><span class="seg-label">結果</span>` +
+          `<span class="m-seg"><span class="gain">MFE ${formatPct(oc.mfe)}</span> / ` +
           `<span class="loss">MAE ${formatPct(oc.mae)}</span></span>${dot}` +
           `<span class="m-seg dim">${oc.horizon}日${oc.provisional ? "・暫定" : ""}</span></div>`
         : "";
