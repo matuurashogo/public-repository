@@ -43,10 +43,13 @@ function tradesForCalc() {
 async function refreshIndicators() {
   const codes = store.getTrades().filter((t) => t.side === "買").map((t) => t.code);
   await prefetchIndicators(codes);
-  freezeEntrySnapshots(); // GLOB-0005: 取得できた分を取引レコードへ凍結保存（バックフィル）
+  const frozen = freezeEntrySnapshots(); // GLOB-0005: 取得できた分を取引レコードへ凍結保存（バックフィル）
   renderTagBreakdown();
   renderMissingIndicators();
   renderList(tradesForCalc(), calcRealized(tradesForCalc()).records);
+  // 凍結が発生したら正本(Drive)へ永続化する。サインイン中のみ送信、未サインインは
+  // ローカルキャッシュ済み（saveToDriveが早期return）。冪等で、凍結ぶんが無い時は走らない。
+  if (frozen > 0) saveToDrive();
 }
 
 // GLOB-0005: 未凍結の買いに、約定時点の客観スナップショットを焼き込む。
