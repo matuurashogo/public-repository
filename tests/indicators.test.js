@@ -81,3 +81,39 @@ test("isEntryDataReady: 当日日中(最新=前日)は未確定、翌日(最新=
   // データ未取得は未確定
   assert.equal(isEntryDataReady(null, "2026-06-05"), false);
 });
+
+import { computeEntryOutcome } from "../js/indicators.js";
+
+// 終値系列フィクスチャ: index 0..n-1、d="2026-02-01".. 昇順、c は引数で指定
+const mkRows = (closes) =>
+  closes.map((c, i) => ({ d: `2026-02-${String(i + 1).padStart(2, "0")}`, c }));
+
+test("computeEntryOutcome: MFE/MAE・+5/+20日リターン・complete を算出", () => {
+  const closes = Array(21).fill(1000);
+  closes[3] = 900; // 最安 → MAE
+  closes[5] = 1050; // +5日
+  closes[8] = 1200; // 最高 → MFE
+  closes[20] = 1100; // +20日
+  const out = computeEntryOutcome(mkRows(closes), "2026-02-01", 1000, 20);
+  assert.equal(out.cost, 1000);
+  assert.equal(out.ret5, 0.05);
+  assert.equal(out.ret20, 0.1);
+  assert.equal(out.mfe, 0.2); // (1200-1000)/1000
+  assert.equal(out.mae, -0.1); // (900-1000)/1000
+  assert.equal(out.complete, true);
+  assert.equal(out.asOf, "2026-02-21");
+});
+
+test("computeEntryOutcome: 20営業日未到達は complete=false・ret20=null（暫定）", () => {
+  const out = computeEntryOutcome(mkRows(Array(10).fill(1000)), "2026-02-01", 1000, 20);
+  assert.equal(out.complete, false);
+  assert.equal(out.ret20, null); // i0+20 が範囲外
+  assert.equal(out.ret5, 0); // 横ばいなので 0
+});
+
+test("computeEntryOutcome: 不正入力は null（cost<=0 / 空 / 期間前 / 終値なし）", () => {
+  assert.equal(computeEntryOutcome(mkRows([1000, 1010]), "2026-02-01", 0), null); // cost<=0
+  assert.equal(computeEntryOutcome([], "2026-02-01", 1000), null); // 空
+  assert.equal(computeEntryOutcome(mkRows([1000]), "2025-12-31", 1000), null); // 期間前
+  assert.equal(computeEntryOutcome([{ d: "2026-02-01" }], "2026-02-01", 1000), null); // c欠損
+});

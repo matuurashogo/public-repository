@@ -171,3 +171,23 @@ test("setEntrySnap: 凍結を保存し updatedAt を更新する", () => {
   assert.ok(saved.updatedAt >= before);
   assert.equal(s.setEntrySnap("無いid", SNAP), false);
 });
+
+// --- TBK-0005: 結果メトリクス(entryOutcome)の凍結保存 ---
+const OUTCOME = { cost: 6090, ret5: 0.012, ret20: -0.004, mfe: 0.085, mae: -0.032, asOf: "2026-07-03", horizon: 20 };
+
+test("マージ: entryOutcome を持つ新しい方が採用され凍結値が残る", () => {
+  const local = { version: 2, trades: [T("a", 200, { entryOutcome: OUTCOME })], deletedIds: {} };
+  const remote = { version: 2, trades: [T("a", 100)], deletedIds: {} };
+  const m = mergeMasters(local, remote);
+  assert.deepEqual(m.trades[0].entryOutcome, OUTCOME);
+});
+
+test("setEntryOutcome: 凍結を保存し updatedAt を更新する", () => {
+  const s = new Store();
+  const t = s.addTrade({ date: "2026-06-04", code: "6101", side: "買", quantity: 100, price: 6090 });
+  const before = t.updatedAt;
+  assert.equal(s.setEntryOutcome(t.id, OUTCOME), true);
+  assert.deepEqual(s.getMaster().trades[0].entryOutcome, OUTCOME);
+  assert.ok(s.getMaster().trades[0].updatedAt >= before);
+  assert.equal(s.setEntryOutcome("無いid", OUTCOME), false);
+});

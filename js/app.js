@@ -13,7 +13,7 @@ import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { parseTradeText, normalizeOcrText } from "./parse.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
 import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize, accountMixWarnings } from "./pnl.js";
-import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus, latestIndicatorDate, isEntryDataReady } from "./indicators.js";
+import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus, latestIndicatorDate, isEntryDataReady, getRows, computeEntryOutcome } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 
@@ -43,13 +43,40 @@ function tradesForCalc() {
 async function refreshIndicators() {
   const codes = store.getTrades().filter((t) => t.side === "買").map((t) => t.code);
   await prefetchIndicators(codes);
-  const frozen = freezeEntrySnapshots(); // TBK-0003: 取得できた分を取引レコードへ凍結保存（バックフィル）
+  // TBK-0003: 約定時点の客観スナップショット / TBK-0005: 約定後の結果メトリクスを凍結保存（バックフィル）
+  const frozen = freezeEntrySnapshots() + freezeEntryOutcomes();
   renderTagBreakdown();
   renderMissingIndicators();
   renderList(tradesForCalc(), calcRealized(tradesForCalc()).records);
   // 凍結が発生したら正本(Drive)へ永続化する。サインイン中のみ送信、未サインインは
   // ローカルキャッシュ済み（saveToDriveが早期return）。冪等で、凍結ぶんが無い時は走らない。
   if (frozen > 0) saveToDrive();
+}
+
+// TBK-0005: 結果メトリクス（MFE/MAE・+5/+20営業日リターン）が確定した買いを凍結保存する。
+// horizon(20営業日)ぶんの終値が出揃った(complete)買いのみ対象。未到達は暫定表示のまま据え置く。
+function freezeEntryOutcomes() {
+  let changed = 0;
+  for (const t of store.getTrades()) {
+    if (t.side !== "買" || t.entryOutcome) continue;
+    const rows = getRows(t.code);
+    if (!rows) continue;
+    const out = computeEntryOutcome(rows, t.date, t.price, 20); // cost=約定単価（実フィル）
+    if (!out || !out.complete) continue;
+    store.setEntryOutcome(t.id, {
+      cost: out.cost, ret5: out.ret5, ret20: out.ret20,
+      mfe: out.mfe, mae: out.mae, asOf: out.asOf, horizon: out.horizon,
+    });
+    changed++;
+  }
+  return changed;
+}
+
+// 買いの結果メトリクスを取得する。凍結値(TBK-0005)を優先し、無ければ終値系列から暫定計算。
+function entryOutcomeForBuy(trade) {
+  if (trade.entryOutcome) return { ...trade.entryOutcome, provisional: false };
+  const out = computeEntryOutcome(getRows(trade.code), trade.date, trade.price, 20);
+  return out ? { ...out, provisional: true } : null;
 }
 
 // TBK-0003: 未凍結の買いに、約定時点の客観スナップショットを焼き込む。
@@ -584,6 +611,17 @@ function renderList(trades, records) {
           `<span class="m-seg">出来高${snap.vol.toFixed(1)}倍</span></div>`
         : "";
 
+      // 買いは、約定後の結果メトリクス（MFE/MAE・N日後リターン）を併記。20日未到達は「暫定」。
+      const oc = !isSell ? entryOutcomeForBuy(t) : null;
+      const fmtR = (v) => (v == null ? "—" : formatPct(v));
+      const outcomeLine = oc
+        ? `<div class="trade-outcome"><span class="m-seg">結果${oc.horizon}日${oc.provisional ? "・暫定" : ""}</span>${dot}` +
+          `<span class="m-seg gain">MFE ${formatPct(oc.mfe)}</span>${dot}` +
+          `<span class="m-seg loss">MAE ${formatPct(oc.mae)}</span>${dot}` +
+          `<span class="m-seg">+5日 ${fmtR(oc.ret5)}</span>${dot}` +
+          `<span class="m-seg">+20日 ${fmtR(oc.ret20)}</span></div>`
+        : "";
+
       // 損益行は売却のみ表示（買いは右上の「買」バッジで足りるため金額行は出さない）
       const pnlLine = isSell
         ? `<div class="pnl-line">` +
@@ -598,7 +636,7 @@ function renderList(trades, records) {
         `<div class="trade">` +
         `<div class="left">` +
         `<div class="name">${name}<span class="code">${esc(t.code)}</span>${nisa}</div>` +
-        `<div class="meta">${meta}</div>${tagBadge}${snapLine}</div>` +
+        `<div class="meta">${meta}</div>${tagBadge}${snapLine}${outcomeLine}</div>` +
         `<div class="right">` +
         `<div class="right-top">` +
         `<span class="badge ${isSell ? "sell" : "buy"}">${t.side}</span>` +

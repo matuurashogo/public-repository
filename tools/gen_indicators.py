@@ -187,6 +187,7 @@ def compute_payloads(panel) -> dict:
                     "vol": round(float(r["vol"]), 2),
                     "rsi": round(float(r["rsi"]), 1),
                     "hv": round(float(r["hv"]), 3),
+                    "c": round(float(r["adj_close"]), 1),  # 調整後終値（結果メトリクス用・TBK-0004）
                 }
             )
         out[code4] = {

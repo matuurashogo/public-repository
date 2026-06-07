@@ -88,6 +88,61 @@ export function latestIndicatorDate(code) {
   return data.rows[data.rows.length - 1].d;
 }
 
+// 取得済みの指標行（昇順・各 {d, c, ...}）を返す。未取得・欠損は null。結果メトリクス計算用。
+export function getRows(code) {
+  const data = _cache[String(code)];
+  return data && Array.isArray(data.rows) ? data.rows : null;
+}
+
+const _round4 = (x) => Math.round(x * 1e4) / 1e4;
+
+// 約定後の結果メトリクスを終値系列(c)から計算する純粋関数（TBK-0005）。
+//   rows: 昇順の指標行（各 {d, c, ...}）/ entryDate: 約定日 / cost: 約定単価 / horizon: 営業日数
+// 戻り値: { cost, ret5, ret20, mfe, mae, asOf, horizon, complete } または null。
+//   ret5/ret20 = +5/+20営業日後の終値リターン（無ければ null）
+//   mfe/mae    = 起点〜+horizon営業日の最大含み益率 / 最大含み損率
+//   complete   = horizon営業日ぶんの行が揃ったか（揃ったら凍結可能。未到達は暫定）
+export function computeEntryOutcome(rows, entryDate, cost, horizon = 20) {
+  if (!Array.isArray(rows) || rows.length === 0 || !(cost > 0)) return null;
+  // 約定日の行（d <= entryDate を満たす最後）を二分探索で特定（lookupSnapshot と同じ起点）
+  let lo = 0;
+  let hi = rows.length - 1;
+  let i0 = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (rows[mid].d <= entryDate) {
+      i0 = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (i0 < 0 || typeof rows[i0].c !== "number") return null; // 期間前 or 旧スキーマ（終値なし）
+  const end = Math.min(i0 + horizon, rows.length - 1);
+  let maxC = -Infinity;
+  let minC = Infinity;
+  for (let i = i0; i <= end; i++) {
+    const c = rows[i].c;
+    if (typeof c !== "number") continue;
+    if (c > maxC) maxC = c;
+    if (c < minC) minC = c;
+  }
+  const ret = (n) => {
+    const r = rows[i0 + n];
+    return r && typeof r.c === "number" ? _round4((r.c - cost) / cost) : null;
+  };
+  return {
+    cost,
+    ret5: ret(5),
+    ret20: ret(20),
+    mfe: _round4((maxC - cost) / cost),
+    mae: _round4((minC - cost) / cost),
+    asOf: rows[end].d,
+    horizon,
+    complete: i0 + horizon <= rows.length - 1,
+  };
+}
+
 // スナップショットを客観軸のバケット名へ写像する（純粋）。閾値は設計の叩き台。
 //   axis: "dip"（凹みの深さ）/ "vol"（出来高急増）/ "trend"（トレンド位置）
 //         "rsi"（売られすぎ度）/ "hv"（年率ボラティリティ）

@@ -226,6 +226,9 @@ td.muted { color: #b0b0b5; }
 .trade-tag { display: inline-block; font-size: 11px; font-weight: 600; color: #5b5b60;
   background: #f0f0f3; border-radius: 6px; padding: 2px 8px; margin-top: 5px; }
 .trade-snap { font-size: 11px; color: #8a8a8e; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.trade-outcome { font-size: 11px; color: #8a8a8e; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.trade-outcome .m-seg.gain { color: #1f9d55; }
+.trade-outcome .m-seg.loss { color: #d1453b; }
 
 /* 客観データ未取得の銘柄カード */
 .missing-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }

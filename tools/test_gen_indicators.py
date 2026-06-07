@@ -44,6 +44,8 @@ class TestComputePayloads(unittest.TestCase):
         # HV は有限の正の値（log收益率の20日σ×√250）
         self.assertIsInstance(last["hv"], float)
         self.assertGreater(last["hv"], 0.0)
+        # c = 調整後終値（結果メトリクス用・TBK-0004）。末尾の adj_close=120 を1桁丸めで透過
+        self.assertEqual(last["c"], 120.0)
 
         # payload メタ
         self.assertEqual(payloads["9999"]["code"], "9999")

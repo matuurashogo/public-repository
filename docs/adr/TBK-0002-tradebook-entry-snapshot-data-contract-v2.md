@@ -4,10 +4,10 @@
 
 | 項目 | 値 |
 |------|---|
-| **Status** | `Accepted` |
+| **Status** | `Superseded` |
 | **Date** | 2026-06-04 |
 | **Supersedes** | `TBK-0001` |
-| **Superseded by** | — |
+| **Superseded by** | `TBK-0004`（rows に終値 c を追加してスキーマ拡張） |
 
 ## ❓ コンテキスト（背景と課題）
 
