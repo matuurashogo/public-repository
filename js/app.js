@@ -607,19 +607,15 @@ function renderList(trades, records) {
       const snap = !isSell ? entrySnapForBuy(t) : null;
       const snapLine = snap
         ? `<div class="trade-snap"><span class="m-seg">データ ${formatPct(snap.dev)}</span>${dot}` +
-          `<span class="m-seg">${snap.abv ? "75日線上" : "75日線下"}</span>${dot}` +
-          `<span class="m-seg">出来高${snap.vol.toFixed(1)}倍</span></div>`
+          `<span class="m-seg">${snap.abv ? "75日線上" : "75日線下"}</span></div>`
         : "";
 
-      // 買いは、約定後の結果メトリクス（MFE/MAE・N日後リターン）を併記。20日未到達は「暫定」。
+      // 買いは、約定後の結果を MFE/MAE に絞って併記（+5/+20日は分析用に保存・カードは要点のみ）。
       const oc = !isSell ? entryOutcomeForBuy(t) : null;
-      const fmtR = (v) => (v == null ? "—" : formatPct(v));
       const outcomeLine = oc
-        ? `<div class="trade-outcome"><span class="m-seg">結果${oc.horizon}日${oc.provisional ? "・暫定" : ""}</span>${dot}` +
-          `<span class="m-seg gain">MFE ${formatPct(oc.mfe)}</span>${dot}` +
-          `<span class="m-seg loss">MAE ${formatPct(oc.mae)}</span>${dot}` +
-          `<span class="m-seg">+5日 ${fmtR(oc.ret5)}</span>${dot}` +
-          `<span class="m-seg">+20日 ${fmtR(oc.ret20)}</span></div>`
+        ? `<div class="trade-outcome"><span class="m-seg"><span class="gain">MFE ${formatPct(oc.mfe)}</span> / ` +
+          `<span class="loss">MAE ${formatPct(oc.mae)}</span></span>${dot}` +
+          `<span class="m-seg dim">${oc.horizon}日${oc.provisional ? "・暫定" : ""}</span></div>`
         : "";
 
       // 損益行は売却のみ表示（買いは右上の「買」バッジで足りるため金額行は出さない）
