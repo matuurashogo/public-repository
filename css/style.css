@@ -170,6 +170,8 @@ td.muted { color: #b0b0b5; }
 .paste-actions { display: flex; gap: 8px; }
 .paste-actions .btn-ghost { flex: 1; padding: 9px 12px; font-size: 14px; }
 .paste-import .field-hint { margin-top: 0; }
+.list-more { width: 100%; margin-top: 10px; }
+.list-more.hidden { display: none; }
 .form-actions { display: flex; gap: 10px; margin-top: 4px; }
 .btn-primary { flex: 2; padding: 14px; border: 0; border-radius: 12px; background: var(--blue); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
 .btn-ghost { flex: 1; padding: 14px; border: 1px solid #d8d8dd; border-radius: 12px; background: #fff; color: #6a6a6e; font-size: 15px; font-weight: 600; cursor: pointer; }

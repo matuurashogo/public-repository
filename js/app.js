@@ -20,6 +20,9 @@ import { renderCumulative, renderHistogram } from "./charts.js";
 const store = new Store();
 let axis = "month"; // year | month | code
 let editingId = null;
+const LIST_INITIAL = 30; // 取引履歴の初期表示件数（計算は全件・表示だけ絞る）
+const LIST_STEP = 50; // 「もっと見る」で追加表示する件数
+let listLimit = LIST_INITIAL;
 let currentSide = "買";
 let currentAccount = "特定"; // 特定 | NISA
 let currentEntryTag = null; // フォームで選択中のエントリー根拠タグ
@@ -523,7 +526,8 @@ function renderList(trades, records) {
   const list = $("trade-list");
   $("empty-note").classList.toggle("hidden", sorted.length > 0);
 
-  list.innerHTML = sorted
+  const shown = sorted.slice(0, listLimit); // 表示は最新 listLimit 件まで
+  list.innerHTML = shown
     .map((t) => {
       const name = esc(codeToName(t.code) || "（名称未登録）");
       const isSell = t.side === "売";
@@ -576,6 +580,16 @@ function renderList(trades, records) {
       );
     })
     .join("");
+
+  // 「もっと見る」: 残りはボタンで追加表示（計算は全件のまま、描画だけ段階的に増やす）
+  const moreBtn = $("list-more");
+  const remaining = sorted.length - shown.length;
+  if (remaining > 0) {
+    moreBtn.textContent = `もっと見る（残り${remaining}件）`;
+    moreBtn.classList.remove("hidden");
+  } else {
+    moreBtn.classList.add("hidden");
+  }
 }
 
 // ---------- 保存（Drive）----------
@@ -1008,6 +1022,12 @@ function wireEvents() {
   $("f-paste").addEventListener("paste", () =>
     setTimeout(() => applyParsed(parseTradeText($("f-paste").value)), 0)
   );
+  // 取引履歴の「もっと見る」（表示件数を増やして再描画）
+  $("list-more").addEventListener("click", () => {
+    listLimit += LIST_STEP;
+    renderAll();
+  });
+
   // 画像から読み取る（OCR）
   $("f-ocr-btn").addEventListener("click", () => $("f-ocr-file").click());
   $("f-ocr-file").addEventListener("change", (e) => {
