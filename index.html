@@ -117,10 +117,14 @@
     <div class="card-title" id="form-title">取引を追加</div>
     <form id="trade-form">
       <div class="paste-import">
-        <label>約定テキストを貼り付け（任意）
-          <textarea id="f-paste" rows="2" placeholder="松井の「約定詳細」をLive Textでコピーして貼り付け → 自動入力"></textarea>
+        <label>約定テキスト／画像から取り込み（任意）
+          <textarea id="f-paste" rows="2" placeholder="松井の「約定詳細」をLive Textでコピーして貼り付け、または「画像から読み取る」"></textarea>
         </label>
-        <button type="button" id="f-paste-btn" class="btn-ghost">解析して入力</button>
+        <div class="paste-actions">
+          <button type="button" id="f-ocr-btn" class="btn-ghost">📷 画像から読み取る</button>
+          <button type="button" id="f-paste-btn" class="btn-ghost">貼り付けを解析</button>
+        </div>
+        <input type="file" id="f-ocr-file" accept="image/*" hidden />
         <p id="f-paste-note" class="field-hint"></p>
       </div>
       <label>約定日<input type="date" id="f-date" required /></label>

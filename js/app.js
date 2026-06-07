@@ -736,6 +736,78 @@ function applyParsed(p) {
     "。内容を確認してから登録してください。";
 }
 
+// 画像（約定詳細のスクショ）をOCRして取引フォームへ流し込む。
+// Tesseract.js はサイズが大きいので、このボタンを押したときだけCDNから遅延ロードする。
+let _ocrBusy = false;
+async function runImageOcr(file) {
+  if (!file || _ocrBusy) return;
+  _ocrBusy = true;
+  const note = $("f-paste-note");
+  try {
+    note.textContent = "画像を準備中…";
+    const canvas = await preprocessForOcr(file);
+    note.textContent = "OCRを読み込み中…（初回はデータ取得に少し時間がかかります）";
+    const { createWorker } = await import(
+      "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js"
+    );
+    const worker = await createWorker("jpn", 1, {
+      logger: (m) => {
+        if (m.status === "recognizing text")
+          note.textContent = `画像を解析中… ${Math.round((m.progress || 0) * 100)}%`;
+      },
+    });
+    const {
+      data: { text },
+    } = await worker.recognize(canvas);
+    await worker.terminate();
+    $("f-paste").value = text; // 生テキストも表示（外したら手直し→「貼り付けを解析」で再実行可）
+    applyParsed(parseTradeText(text));
+  } catch (e) {
+    console.error(e);
+    note.textContent =
+      "画像の解析に失敗しました。オンラインで再試行するか、Live Textで文字をコピーして貼り付けてください。";
+  } finally {
+    _ocrBusy = false;
+  }
+}
+
+// OCR前処理: ダークテーマ（白文字×黒背景）は精度が落ちるため、
+// 平均輝度で暗い画像を判定して反転し、グレースケール化＋適度に拡大する。
+function preprocessForOcr(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const longSide = Math.max(img.width, img.height) || 1;
+      const scale = Math.min(2, 1600 / longSide) || 1;
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      const id = ctx.getImageData(0, 0, w, h);
+      const d = id.data;
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+      const dark = sum / (d.length / 4) < 128;
+      for (let i = 0; i < d.length; i += 4) {
+        let g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+        if (dark) g = 255 - g; // 反転して「黒文字 on 白背景」に寄せる
+        d[i] = d[i + 1] = d[i + 2] = g;
+      }
+      ctx.putImageData(id, 0, 0);
+      URL.revokeObjectURL(img.src);
+      resolve(c);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(img.src);
+      reject(new Error("画像を読み込めませんでした。"));
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 // ---------- 銘柄サジェスト ----------
 function hideSuggest() {
   const list = $("suggest-list");
@@ -908,6 +980,13 @@ function wireEvents() {
   $("f-paste").addEventListener("paste", () =>
     setTimeout(() => applyParsed(parseTradeText($("f-paste").value)), 0)
   );
+  // 画像から読み取る（OCR）
+  $("f-ocr-btn").addEventListener("click", () => $("f-ocr-file").click());
+  $("f-ocr-file").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = ""; // 同じ画像を選び直しても change が発火するように
+    if (f) runImageOcr(f);
+  });
   $("f-code").addEventListener("input", updateNamePreview);
   $("f-side").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-side]");
