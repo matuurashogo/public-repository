@@ -141,3 +141,33 @@ test("Store.deleteTag: 候補から外すが既存取引のタグ値は残す（
   assert.equal(s.getMaster().trades[0].exitTag, "損切り"); // 取引の記録は残る
   assert.equal(s.deleteTag("exit", "無い"), false); // 無いものは false
 });
+
+// --- GLOB-0005: エントリー・スナップショットの凍結保存 ---
+const SNAP = { dev: -0.0123, abv: false, vol: 1.42, rsi: 48.2, hv: 0.243, asOf: "2026-06-04" };
+
+test("マージ: entrySnap を持つ新しい方(updatedAt大)が採用され凍結値が残る", () => {
+  const local = { version: 2, trades: [T("a", 200, { entrySnap: SNAP })], deletedIds: {} };
+  const remote = { version: 2, trades: [T("a", 100)], deletedIds: {} }; // 古い・凍結なし
+  const m = mergeMasters(local, remote);
+  assert.equal(m.trades.length, 1);
+  assert.deepEqual(m.trades[0].entrySnap, SNAP);
+});
+
+test("マージ: 相手が古い凍結なしでも、こちらの凍結が消えない（透過）", () => {
+  const local = { version: 2, trades: [T("a", 100)], deletedIds: {} };
+  const remote = { version: 2, trades: [T("a", 300, { entrySnap: SNAP })], deletedIds: {} };
+  const m = mergeMasters(local, remote);
+  assert.deepEqual(m.trades[0].entrySnap, SNAP); // 新しい方(remote)が勝つ
+});
+
+test("setEntrySnap: 凍結を保存し updatedAt を更新する", () => {
+  const s = new Store();
+  const t = s.addTrade({ date: "2026-06-04", code: "6101", side: "買", quantity: 100, price: 6090 });
+  const before = t.updatedAt;
+  const ok = s.setEntrySnap(t.id, SNAP);
+  assert.equal(ok, true);
+  const saved = s.getMaster().trades[0];
+  assert.deepEqual(saved.entrySnap, SNAP);
+  assert.ok(saved.updatedAt >= before);
+  assert.equal(s.setEntrySnap("無いid", SNAP), false);
+});

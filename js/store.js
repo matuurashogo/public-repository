@@ -167,6 +167,16 @@ export class Store {
     return this.master.trades[idx];
   }
 
+  // 買いトレードにエントリー・スナップショットを凍結保存する（GLOB-0005）。
+  // updatedAt を更新するため、次回同期で凍結版が last-write-wins により伝播する。
+  setEntrySnap(id, snap) {
+    const idx = this.master.trades.findIndex((t) => t.id === id);
+    if (idx === -1) return false;
+    this.master.trades[idx] = { ...this.master.trades[idx], entrySnap: snap, updatedAt: Date.now() };
+    this._writeCache();
+    return true;
+  }
+
   // ---- タグ候補の追加（重複・空は無視。trim 済みを採用）----
   addEntryTag(tag) {
     return this._addTag("entryTags", tag);

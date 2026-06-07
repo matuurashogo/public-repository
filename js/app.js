@@ -43,9 +43,34 @@ function tradesForCalc() {
 async function refreshIndicators() {
   const codes = store.getTrades().filter((t) => t.side === "買").map((t) => t.code);
   await prefetchIndicators(codes);
+  freezeEntrySnapshots(); // GLOB-0005: 取得できた分を取引レコードへ凍結保存（バックフィル）
   renderTagBreakdown();
   renderMissingIndicators();
   renderList(tradesForCalc(), calcRealized(tradesForCalc()).records);
+}
+
+// GLOB-0005: 未凍結の買いに、約定時点の客観スナップショットを焼き込む。
+// データが取得済み(ok)の銘柄のみ対象。未取得/欠損は次回に再試行する。
+// 永続化はローカルへ即時（updatedAt更新）、Driveへは次回同期で伝播する。
+function freezeEntrySnapshots() {
+  let changed = 0;
+  for (const t of store.getTrades()) {
+    if (t.side !== "買" || t.entrySnap) continue;
+    if (indicatorStatus(t.code) !== "ok") continue;
+    const s = getSnapshot(t.code, t.date);
+    if (!s) continue;
+    store.setEntrySnap(t.id, {
+      dev: s.dev, abv: s.abv, vol: s.vol, rsi: s.rsi, hv: s.hv, asOf: s.date,
+    });
+    changed++;
+  }
+  return changed;
+}
+
+// 買いの客観スナップショットを取得する。凍結値(GLOB-0005)を優先し、無ければライブ引き当て。
+function entrySnapForBuy(trade) {
+  if (trade.entrySnap) return trade.entrySnap;
+  return getSnapshot(trade.code, trade.date);
 }
 
 // 取引したが客観データ未取得（監視リスト外など）の銘柄を一覧表示し、追加を案内する。
@@ -546,7 +571,7 @@ function renderList(trades, records) {
       const meta = metaSegs.map((s) => `<span class="m-seg">${s}</span>`).join(dot);
 
       // 買いは、その日の客観スナップショット（取得済みなら）を併記
-      const snap = !isSell ? getSnapshot(t.code, t.date) : null;
+      const snap = !isSell ? entrySnapForBuy(t) : null;
       const snapLine = snap
         ? `<div class="trade-snap"><span class="m-seg">データ ${formatPct(snap.dev)}</span>${dot}` +
           `<span class="m-seg">${snap.abv ? "75日線上" : "75日線下"}</span>${dot}` +
