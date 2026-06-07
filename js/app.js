@@ -10,7 +10,7 @@ import {
   saveMaster,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
-import { parseTradeText } from "./parse.js";
+import { parseTradeText, normalizeOcrText } from "./parse.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
 import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize, accountMixWarnings } from "./pnl.js";
 import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus } from "./indicators.js";
@@ -779,7 +779,8 @@ async function runImageOcr(file) {
       data: { text },
     } = await worker.recognize(canvas);
     await worker.terminate();
-    $("f-paste").value = text; // 生テキストも表示（外したら手直し→「貼り付けを解析」で再実行可）
+    // 読める形に正規化して表示（丸数字→数字など）。外したら手直し→「貼り付けを解析」で再実行可。
+    $("f-paste").value = normalizeOcrText(text);
     applyParsed(parseTradeText(text));
   } catch (e) {
     console.error("OCR失敗:", e);

@@ -18,15 +18,20 @@ function findDate(t, label) {
 
 // 約定テキストを解析して { date, code, side, quantity, price, account } を返す。
 // すべて null のときは null を返す。
-export function parseTradeText(text) {
-  if (!text || !String(text).trim()) return null;
-  // OCR/全角ゆれを吸収する正規化:
-  //  1) NFKC: 丸数字 ①→1 / ⑳→20、全角英数→半角 に変換
-  //  2) 3桁区切りの . , を畳む（749.000 や 7,490 → 749000 / 7490。OCRは , を . と誤読しがち）
-  //  3) 文字間の水平空白を除去（「約 定 数」→「約定数」。改行は保持）
+// OCR/全角ゆれを読める形に正規化する（表示にも使う）。
+//  1) NFKC: 丸数字 ①→1 / ⑳→20、全角英数→半角 に変換
+//  2) 3桁区切りの . , を畳む（749.000 / 7,490 → 749000 / 7490。OCRは , を . と誤読しがち）
+// ※文字間の空白除去はパース時のみ行う（表示は空白を残して読みやすくする）。
+export function normalizeOcrText(text) {
   let t = String(text).normalize("NFKC");
   t = t.replace(/(\d)[.,，](?=\d{3}(?!\d))/g, "$1");
-  t = t.replace(/[^\S\n]+/g, "");
+  return t;
+}
+
+export function parseTradeText(text) {
+  if (!text || !String(text).trim()) return null;
+  // 正規化したうえで、ラベル照合のため文字間の水平空白を除去（改行は保持）。
+  const t = normalizeOcrText(text).replace(/[^\S\n]+/g, "");
 
   // 日付: 約定日を最優先。無ければ受付日時/受渡日。
   const date = findDate(t, "約定日") || findDate(t, "受付日時") || findDate(t, "受渡日");
