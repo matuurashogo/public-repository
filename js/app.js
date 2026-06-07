@@ -738,7 +738,25 @@ function applyParsed(p) {
 
 // 画像（約定詳細のスクショ）をOCRして取引フォームへ流し込む。
 // Tesseract.js はサイズが大きいので、このボタンを押したときだけCDNから遅延ロードする。
+// ESMの動的importはiOSのPWAで不安定なため、枯れたUMD版をscriptタグで読み込み
+// グローバル window.Tesseract を使う。worker/コア/言語データのパスも明示する。
+const TESS_VER = "5.1.1";
 let _ocrBusy = false;
+
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESS_VER}/dist/tesseract.min.js`;
+    s.onload = () =>
+      window.Tesseract
+        ? resolve(window.Tesseract)
+        : reject(new Error("Tesseract未定義"));
+    s.onerror = () => reject(new Error("OCRライブラリの読み込みに失敗"));
+    document.head.appendChild(s);
+  });
+}
+
 async function runImageOcr(file) {
   if (!file || _ocrBusy) return;
   _ocrBusy = true;
@@ -746,11 +764,12 @@ async function runImageOcr(file) {
   try {
     note.textContent = "画像を準備中…";
     const canvas = await preprocessForOcr(file);
-    note.textContent = "OCRを読み込み中…（初回はデータ取得に少し時間がかかります）";
-    const { createWorker } = await import(
-      "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js"
-    );
-    const worker = await createWorker("jpn", 1, {
+    note.textContent = "OCRを読み込み中…（初回はデータ取得に時間がかかります）";
+    const T = await loadTesseract();
+    const worker = await T.createWorker("jpn", 1, {
+      workerPath: `https://cdn.jsdelivr.net/npm/tesseract.js@${TESS_VER}/dist/worker.min.js`,
+      corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5",
+      langPath: "https://tessdata.projectnaptha.com/4.0.0",
       logger: (m) => {
         if (m.status === "recognizing text")
           note.textContent = `画像を解析中… ${Math.round((m.progress || 0) * 100)}%`;
@@ -763,9 +782,9 @@ async function runImageOcr(file) {
     $("f-paste").value = text; // 生テキストも表示（外したら手直し→「貼り付けを解析」で再実行可）
     applyParsed(parseTradeText(text));
   } catch (e) {
-    console.error(e);
-    note.textContent =
-      "画像の解析に失敗しました。オンラインで再試行するか、Live Textで文字をコピーして貼り付けてください。";
+    console.error("OCR失敗:", e);
+    const msg = e && e.message ? e.message : String(e);
+    note.textContent = `画像の解析に失敗しました（${msg}）。Live Textで文字をコピーして貼り付ける方法も使えます。`;
   } finally {
     _ocrBusy = false;
   }
