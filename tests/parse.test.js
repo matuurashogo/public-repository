@@ -80,6 +80,36 @@ test("コードは年(2026)を誤検出しない", () => {
   assert.equal(p.code, "6855");
 });
 
+// 実機OCR(Tesseract)の生出力。丸数字に化け・文字間空白・カンマがピリオド誤読される。
+const OCR_RAW = `⑨:①⑧ ml 令 GD
+く 約 定 詳 細
+電 子 材 料 0⑥/0⑤ ⑮:③0
+ー ⑦⑦②0 -o.⑧⑨%
+注 文 情 報 ( 簡 易 )
+受 付 日 時 ⑳②⑥/0⑥/0⑤ ⑩:④⑥
+取 引 区 分 現 物 買
+口 座 区 分 特 定
+発 注 数 ⑩0 株
+執 行 条 件 ー
+値 段 ⑦.④⑨0 円
+約 定 明 細
+約 定 数 ⑩0 株
+約 定 日 ⑳②⑥/0⑥/0⑤
+受 渡 日 ⑳②⑥/0⑥/0⑨
+受 渡 金 額 -⑦⑤0,①⑧⑧ 円
+約 定 代 金 ⑦④⑨.000 円`;
+
+test("OCR生出力(丸数字・空白・カンマ誤読)を正規化して抽出する", () => {
+  const p = parseTradeText(OCR_RAW);
+  assert.equal(p.date, "2026-06-05");
+  assert.equal(p.side, "買");
+  assert.equal(p.account, "特定");
+  assert.equal(p.quantity, 100);
+  assert.equal(p.price, 7490); // 約定代金749,000 ÷ 100
+  // コードは市場名(東証)が読めず誤検出も避けるため null（手入力にフォールバック）
+  assert.equal(p.code, null);
+});
+
 test("無関係なテキストは null を返す", () => {
   assert.equal(parseTradeText("こんにちは"), null);
   assert.equal(parseTradeText(""), null);

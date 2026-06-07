@@ -20,7 +20,13 @@ function findDate(t, label) {
 // すべて null のときは null を返す。
 export function parseTradeText(text) {
   if (!text || !String(text).trim()) return null;
-  const t = String(text).replace(/[　\t]/g, " ");
+  // OCR/全角ゆれを吸収する正規化:
+  //  1) NFKC: 丸数字 ①→1 / ⑳→20、全角英数→半角 に変換
+  //  2) 3桁区切りの . , を畳む（749.000 や 7,490 → 749000 / 7490。OCRは , を . と誤読しがち）
+  //  3) 文字間の水平空白を除去（「約 定 数」→「約定数」。改行は保持）
+  let t = String(text).normalize("NFKC");
+  t = t.replace(/(\d)[.,，](?=\d{3}(?!\d))/g, "$1");
+  t = t.replace(/[^\S\n]+/g, "");
 
   // 日付: 約定日を最優先。無ければ受付日時/受渡日。
   const date = findDate(t, "約定日") || findDate(t, "受付日時") || findDate(t, "受渡日");
@@ -55,12 +61,19 @@ export function parseTradeText(text) {
   );
   if (cm) code = cm[1];
   if (!code) {
-    // フォールバック: 年(19xx/20xx)・数量・価格を除いた最初の4桁トークン。
+    // フォールバック: 日付/時刻/価格などのノイズを避けるため文脈で限定。
+    // 直前が数字や区切り( / : . - ー )でなく、直後が数字や 円 % : / . でない4桁のみ採用。
+    // 年(19xx/20xx)・数量・価格と一致するものは除外。誤検出するくらいなら null にする。
     const used = new Set([quantity, price].filter((x) => x != null));
-    const cands = (t.match(/\b(?:[0-9]{3}[0-9A-Z]|[0-9]{4})\b/g) || []).filter(
-      (c) => !/^(19|20)\d{2}$/.test(c) && !used.has(toNum(c))
-    );
-    code = cands[0] || null;
+    const re = /(?:^|[^\d/:.\-ー])((?:[0-9]{3}[0-9A-Z]|[0-9]{4}))(?![\d円%:/.])/g;
+    let m;
+    while ((m = re.exec(t))) {
+      const c = m[1];
+      if (/^(19|20)\d{2}$/.test(c)) continue;
+      if (used.has(toNum(c))) continue;
+      code = c;
+      break;
+    }
   }
 
   const parsed = { date, code, side, quantity, price, account };
