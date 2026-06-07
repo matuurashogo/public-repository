@@ -725,6 +725,14 @@ function applyParsed(p) {
     $("f-code").value = String(p.code).toUpperCase().slice(0, 4);
     updateNamePreview();
     got.push("コード");
+  } else if (p.name) {
+    // コード数字が読めなくても社名から逆引きで補完（OCRで数字が化けたとき有効）
+    const hit = searchStocks(p.name)[0];
+    if (hit) {
+      $("f-code").value = hit.code;
+      updateNamePreview();
+      got.push(`コード(社名「${p.name}」から推定)`);
+    } else miss.push("コード");
   } else miss.push("コード");
   if (p.side) { setSide(p.side); got.push("売買"); } else miss.push("売買");
   if (p.quantity != null) { $("f-qty").value = p.quantity; got.push("数量"); } else miss.push("数量");

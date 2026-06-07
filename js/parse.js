@@ -81,7 +81,23 @@ export function parseTradeText(text) {
     }
   }
 
-  const parsed = { date, code, side, quantity, price, account };
-  if (Object.values(parsed).every((v) => v == null)) return null;
+  // 社名候補: 上部の日本語名の行から先頭の日本語連続を取る（ラベル行・下部ナビは除外）。
+  // OCRでコード数字が読めなくても、社名から銘柄リストを逆引きしてコードを補完するのに使う。
+  let name = null;
+  const LABELS =
+    /約定|注文|区分|受付|受渡|発注|執行|値段|予約|トリガー|明細|詳細|情報|簡易|株価|市況|銘柄|検索|メニュー|マイ|市場/;
+  for (const line of t.split("\n")) {
+    if (LABELS.test(line)) continue;
+    const m = line.match(/[一-龯々ヶぁ-んァ-ヶー]{2,}/);
+    if (m) {
+      name = m[0];
+      break;
+    }
+  }
+
+  const parsed = { date, code, name, side, quantity, price, account };
+  // 社名だけでは取引とみなさない。コア項目が1つも無ければ null。
+  const hasCore = [date, code, side, quantity, price, account].some((v) => v != null);
+  if (!hasCore) return null;
   return parsed;
 }

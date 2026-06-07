@@ -32,6 +32,7 @@ test("約定詳細(現物買・特定): 全項目を正しく抽出する", () =
   assert.deepEqual(p, {
     date: "2026-06-05",
     code: "6855",
+    name: "電子材料",
     side: "買",
     quantity: 100,
     price: 7490, // 約定代金749,000 ÷ 約定数100
@@ -106,8 +107,9 @@ test("OCR生出力(丸数字・空白・カンマ誤読)を正規化して抽出
   assert.equal(p.account, "特定");
   assert.equal(p.quantity, 100);
   assert.equal(p.price, 7490); // 約定代金749,000 ÷ 100
-  // コードは市場名(東証)が読めず誤検出も避けるため null（手入力にフォールバック）
+  // コード数字(6855)は読めず誤検出も避けるため null。ただし社名は拾えるので逆引きに使える。
   assert.equal(p.code, null);
+  assert.equal(p.name, "電子材料");
 });
 
 test("無関係なテキストは null を返す", () => {
