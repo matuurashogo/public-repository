@@ -228,7 +228,7 @@ td.muted { color: #b0b0b5; }
 .trade-snap { font-size: 11px; color: #8a8a8e; margin-top: 5px; font-variant-numeric: tabular-nums; line-height: 1.5; }
 .trade-outcome { font-size: 11px; color: #8a8a8e; margin-top: 2px; font-variant-numeric: tabular-nums; line-height: 1.5; }
 /* 「客観」「結果」ラベルを左に固定幅で揃え、値が縦に並んで読みやすくする */
-.seg-label { display: inline-block; min-width: 2.8em; color: #b0b0b5; }
+.seg-label { display: inline-block; min-width: 3.4em; color: #b0b0b5; }
 .trade-outcome .gain { color: #1f9d55; }
 .trade-outcome .loss { color: #d1453b; }
 .trade-outcome .dim { color: #b0b0b5; }
