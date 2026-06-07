@@ -68,3 +68,16 @@ test("bucketOf: snap が null / 未知軸は null", () => {
   assert.equal(bucketOf("dip", null), null);
   assert.equal(bucketOf("nope", { dev: -0.05 }), null);
 });
+
+import { isEntryDataReady } from "../js/indicators.js";
+
+test("isEntryDataReady: 当日日中(最新=前日)は未確定、翌日(最新=約定日)で確定", () => {
+  // 当日(6/05)に取引、データ最新は前日(6/04)→まだ凍結しない
+  assert.equal(isEntryDataReady("2026-06-04", "2026-06-05"), false);
+  // 翌日に最新が約定日へ到達→凍結OK
+  assert.equal(isEntryDataReady("2026-06-05", "2026-06-05"), true);
+  // さらに後日も当然OK
+  assert.equal(isEntryDataReady("2026-06-08", "2026-06-05"), true);
+  // データ未取得は未確定
+  assert.equal(isEntryDataReady(null, "2026-06-05"), false);
+});

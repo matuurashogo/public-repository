@@ -46,6 +46,10 @@
 2. **取得タイミング**: 指標プリフェッチ完了後、未凍結（`!t.entrySnap`）の買いへ
    `getSnapshot(code, date)` の結果を焼き込む（`freezeEntrySnapshots`）。
    新規の買いも既存の買い（バックフィル）も**同一経路**で処理する。
+   - **EODガード**: j-quants はEODデータのため、約定**当日の日中**は前日までの行しか無い。
+     そのまま凍結すると前日値を誤って固定してしまう。よって**約定日ぶんが出揃ってから**
+     （`latestIndicatorDate(code) >= 約定日`、判定は純粋関数 `isEntryDataReady`）凍結する。
+     それまでは凍結せずライブ引き当てで暫定表示し、翌日以降に当日値で確定させる。
 
 3. **永続化**: ローカルキャッシュへ即時保存し、焼き込み時に `updatedAt` を更新する。
    Drive へは**次回の通常同期で伝播**する（`mergeMasters` は id 単位の last-write-wins。

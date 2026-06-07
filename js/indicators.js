@@ -73,6 +73,21 @@ export function getSnapshot(code, date) {
   return lookupSnapshot(data.rows, date);
 }
 
+// 約定日ぶんの客観データが出揃ったか（最新営業日 latestDate が約定日 tradeDate に到達したか）。
+// 純粋関数。当日日中（latestDate=前日）は false を返し、翌日以降に true になる。
+export function isEntryDataReady(latestDate, tradeDate) {
+  return !!latestDate && !!tradeDate && latestDate >= tradeDate;
+}
+
+// その銘柄の指標データに含まれる最新営業日(YYYY-MM-DD)。未取得・空なら null。
+// j-quantsはEODデータのため、約定当日の日中はこの値が前日までになる。
+// 「約定日ぶんが出揃ったか」（latest >= 約定日）の判定に使う＝当日日中の早すぎる凍結を防ぐ。
+export function latestIndicatorDate(code) {
+  const data = _cache[String(code)];
+  if (!data || !Array.isArray(data.rows) || data.rows.length === 0) return null;
+  return data.rows[data.rows.length - 1].d;
+}
+
 // スナップショットを客観軸のバケット名へ写像する（純粋）。閾値は設計の叩き台。
 //   axis: "dip"（凹みの深さ）/ "vol"（出来高急増）/ "trend"（トレンド位置）
 //         "rsi"（売られすぎ度）/ "hv"（年率ボラティリティ）

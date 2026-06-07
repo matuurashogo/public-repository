@@ -13,7 +13,7 @@ import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { parseTradeText, normalizeOcrText } from "./parse.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
 import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize, accountMixWarnings } from "./pnl.js";
-import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus } from "./indicators.js";
+import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus, latestIndicatorDate, isEntryDataReady } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 
@@ -57,6 +57,9 @@ function freezeEntrySnapshots() {
   for (const t of store.getTrades()) {
     if (t.side !== "買" || t.entrySnap) continue;
     if (indicatorStatus(t.code) !== "ok") continue;
+    // 約定日ぶんの客観データが出揃うまで凍結しない（j-quantsはEOD＝当日日中は前日まで）。
+    // 最新営業日が約定日に追いついたら凍結する。それまではライブ引き当てで暫定表示。
+    if (!isEntryDataReady(latestIndicatorDate(t.code), t.date)) continue;
     const s = getSnapshot(t.code, t.date);
     if (!s) continue;
     store.setEntrySnap(t.id, {
