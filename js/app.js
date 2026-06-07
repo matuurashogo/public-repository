@@ -43,7 +43,7 @@ function tradesForCalc() {
 async function refreshIndicators() {
   const codes = store.getTrades().filter((t) => t.side === "買").map((t) => t.code);
   await prefetchIndicators(codes);
-  const frozen = freezeEntrySnapshots(); // GLOB-0005: 取得できた分を取引レコードへ凍結保存（バックフィル）
+  const frozen = freezeEntrySnapshots(); // TBK-0003: 取得できた分を取引レコードへ凍結保存（バックフィル）
   renderTagBreakdown();
   renderMissingIndicators();
   renderList(tradesForCalc(), calcRealized(tradesForCalc()).records);
@@ -52,7 +52,7 @@ async function refreshIndicators() {
   if (frozen > 0) saveToDrive();
 }
 
-// GLOB-0005: 未凍結の買いに、約定時点の客観スナップショットを焼き込む。
+// TBK-0003: 未凍結の買いに、約定時点の客観スナップショットを焼き込む。
 // データが取得済み(ok)の銘柄のみ対象。未取得/欠損は次回に再試行する。
 // 永続化はローカルへ即時（updatedAt更新）、Driveへは次回同期で伝播する。
 function freezeEntrySnapshots() {
@@ -73,7 +73,7 @@ function freezeEntrySnapshots() {
   return changed;
 }
 
-// 買いの客観スナップショットを取得する。凍結値(GLOB-0005)を優先し、無ければライブ引き当て。
+// 買いの客観スナップショットを取得する。凍結値(TBK-0003)を優先し、無ければライブ引き当て。
 function entrySnapForBuy(trade) {
   if (trade.entrySnap) return trade.entrySnap;
   return getSnapshot(trade.code, trade.date);

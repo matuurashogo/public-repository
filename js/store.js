@@ -167,7 +167,7 @@ export class Store {
     return this.master.trades[idx];
   }
 
-  // 買いトレードにエントリー・スナップショットを凍結保存する（GLOB-0005）。
+  // 買いトレードにエントリー・スナップショットを凍結保存する（TBK-0003）。
   // updatedAt を更新するため、次回同期で凍結版が last-write-wins により伝播する。
   setEntrySnap(id, snap) {
     const idx = this.master.trades.findIndex((t) => t.id === id);

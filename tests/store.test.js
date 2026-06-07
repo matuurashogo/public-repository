@@ -142,7 +142,7 @@ test("Store.deleteTag: 候補から外すが既存取引のタグ値は残す（
   assert.equal(s.deleteTag("exit", "無い"), false); // 無いものは false
 });
 
-// --- GLOB-0005: エントリー・スナップショットの凍結保存 ---
+// --- TBK-0003: エントリー・スナップショットの凍結保存 ---
 const SNAP = { dev: -0.0123, abv: false, vol: 1.42, rsi: 48.2, hv: 0.243, asOf: "2026-06-04" };
 
 test("マージ: entrySnap を持つ新しい方(updatedAt大)が採用され凍結値が残る", () => {

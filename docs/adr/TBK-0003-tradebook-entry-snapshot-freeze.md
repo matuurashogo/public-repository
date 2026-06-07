@@ -1,4 +1,4 @@
-# [GLOB-0005] エントリー・スナップショットの取引レコードへの凍結保存
+# [TBK-0003] エントリー・スナップショットの取引レコードへの凍結保存
 
 ## 📜 ステータス
 
@@ -11,7 +11,7 @@
 
 ## ❓ コンテキスト（背景と課題）
 
-`GLOB-0004` で、エントリー時の客観指標（`dev`/`abv`/`vol`/`rsi`/`hv`）を
+`TBK-0002` で、エントリー時の客観指標（`dev`/`abv`/`vol`/`rsi`/`hv`）を
 `data/indicators/<code>.json`（**直近約2年＝ローリング窓**・監視リスト銘柄のみ）として持ち、
 表示のたびに約定日で引き当てる方式（`getSnapshot`）を定めた。
 
@@ -80,5 +80,5 @@
 
 ## 関連
 
-- 指標JSONの契約: `docs/adr/GLOB-0004-tradebook-entry-snapshot-data-contract-v2.md`
+- 指標JSONの契約: `docs/adr/TBK-0002-tradebook-entry-snapshot-data-contract-v2.md`
 - 設計: `docs/plans/2026-06-04-tradebook-entry-rationale-design.md`
