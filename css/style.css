@@ -115,10 +115,18 @@ body {
   100% { transform: translateY(130px) rotate(240deg); opacity: 0; }
 }
 /* モーション控えめ設定では全演出を停止し、即時最終状態にする */
+/* 集計軸スワイプ領域: 縦スクロールは許可しつつ横スワイプを拾う。切替時にスッとスライド */
+#summary-content { touch-action: pan-y; }
+#summary-content.slide-left { animation: slide-from-right .28s ease; }
+#summary-content.slide-right { animation: slide-from-left .28s ease; }
+@keyframes slide-from-right { 0% { opacity: .35; transform: translateX(16px); } 100% { opacity: 1; transform: translateX(0); } }
+@keyframes slide-from-left { 0% { opacity: .35; transform: translateX(-16px); } 100% { opacity: 1; transform: translateX(0); } }
+
 @media (prefers-reduced-motion: reduce) {
   .mascot-figure, .mascot-eyes, .mascot-spark,
   .mascot[data-mood="great"] .mascot-figure, .mascot.pop .mascot-figure,
-  .trade.flash { animation: none !important; }
+  .trade.flash, .mascot-bubble.legend,
+  #summary-content.slide-left, #summary-content.slide-right { animation: none !important; }
   .confetti-piece { display: none !important; }
 }
 .mascot-bubble { position: relative; max-width: 150px; font-size: 11.5px; line-height: 1.35;

@@ -551,6 +551,57 @@ function animateHeroValue(hv, target) {
   requestAnimationFrame(frame);
 }
 
+// 集計軸の並び（タブのDOM順＝スワイプの送り順）
+const AXIS_ORDER = ["year", "month", "code"];
+
+// 集計軸を切り替える。タブのクリックと横スワイプで共通利用。
+// dir>0=右へ送る(次の軸) / dir<0=左へ(前の軸)。省略時は並び順から自動判定し、スライド演出を付ける。
+function setAxis(newAxis, dir) {
+  if (!newAxis || newAxis === axis) return;
+  if (dir === undefined) dir = AXIS_ORDER.indexOf(newAxis) - AXIS_ORDER.indexOf(axis);
+  axis = newAxis;
+  for (const b of $("seg").querySelectorAll("button")) {
+    const on = b.dataset.axis === axis;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  renderAll();
+  // 切替方向に応じて中身をスッとスライドさせる（reduce-motion時は無し）
+  if (dir && !prefersReducedMotion()) {
+    const el = $("summary-content");
+    if (el) {
+      const cls = dir > 0 ? "slide-left" : "slide-right";
+      el.classList.remove("slide-left", "slide-right");
+      void el.offsetWidth; // 連続切替でも再生し直す
+      el.classList.add(cls);
+      setTimeout(() => el.classList.remove(cls), 320);
+    }
+  }
+}
+
+// サマリーカードの横スワイプで隣の軸へ。縦スクロールは妨げない（横方向が明確なときだけ反応）。
+function enableAxisSwipe() {
+  const el = $("summary-content");
+  if (!el) return;
+  let x0 = null;
+  let y0 = null;
+  el.addEventListener("pointerdown", (e) => {
+    x0 = e.clientX;
+    y0 = e.clientY;
+  });
+  el.addEventListener("pointerup", (e) => {
+    if (x0 == null) return;
+    const dx = e.clientX - x0;
+    const dy = e.clientY - y0;
+    x0 = y0 = null;
+    if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.4) return; // 横方向の明確なスワイプのみ
+    const i = AXIS_ORDER.indexOf(axis);
+    const ni = dx < 0 ? i + 1 : i - 1; // 左へスワイプ=次の軸
+    if (ni < 0 || ni >= AXIS_ORDER.length) return; // 端ではクランプ（ループしない）
+    setAxis(AXIS_ORDER[ni], dx < 0 ? 1 : -1);
+  });
+}
+
 function renderSummary(records) {
   const isYear = axis === "year";
   const rows = aggregate(records, axis, codeToName);
@@ -791,6 +842,7 @@ function pickMascotComment(tier) {
 // タブ切替（renderAll の再描画）では引き直さず、今月の状況(tier)が実際に変わったとき
 // （取引の追加・削除など）だけ引き直して整合させる。
 let mascotCommentCache = null; // { tier, text, rarity }
+let recordBubbleUntil = 0; // 自己ベスト演出中はこの時刻まで通常コメントで上書きしない
 
 function renderMascot(records) {
   const el = $("mascot");
@@ -798,6 +850,8 @@ function renderMascot(records) {
   const st = monthMascotState(records);
   el.dataset.mood = st.face;
   $("mascot-figure").innerHTML = mascotFace(st.face);
+  // 自己ベスト更新の特別メッセージ表示中は、表情だけ更新して吹き出しは据え置く
+  if (Date.now() < recordBubbleUntil) return;
   if (!mascotCommentCache || mascotCommentCache.tier !== st.tier) {
     const picked = pickMascotComment(st.tier);
     mascotCommentCache = { tier: st.tier, text: picked.text, rarity: picked.rarity };
@@ -820,45 +874,82 @@ function popMascot() {
   setTimeout(() => m.classList.remove("pop"), 650);
 }
 
-function launchConfetti(strong) {
+// 紙吹雪。level: "normal"=保存 / "win"=利確 / "record"=自己ベスト更新（金系・多め・長め）。
+function launchConfetti(level) {
   if (prefersReducedMotion()) return;
   const host = document.querySelector(".summary-hero") || document.body;
   const layer = document.createElement("div");
   layer.className = "confetti-layer";
-  const colors = ["#EFC15A", "#D9A23A", "#FFD36B", "#FF9E7D", "#7FC9FF"];
-  const count = strong ? 26 : 14;
+  const palette =
+    level === "record"
+      ? ["#FFD36B", "#EFC15A", "#D9A23A", "#FFE9A8", "#FFB23D"] // 金系のお祝い
+      : ["#EFC15A", "#D9A23A", "#FFD36B", "#FF9E7D", "#7FC9FF"];
+  const count = level === "record" ? 44 : level === "win" ? 26 : 14;
   for (let i = 0; i < count; i++) {
     const p = document.createElement("span");
     p.className = "confetti-piece";
     p.style.left = Math.random() * 100 + "%";
-    p.style.background = colors[i % colors.length];
-    p.style.animationDelay = Math.random() * 0.15 + "s";
-    p.style.animationDuration = 0.9 + Math.random() * 0.5 + "s";
+    p.style.background = palette[i % palette.length];
+    p.style.animationDelay = Math.random() * 0.2 + "s";
+    p.style.animationDuration = 0.9 + Math.random() * 0.6 + "s";
     layer.appendChild(p);
   }
   host.appendChild(layer);
-  setTimeout(() => layer.remove(), 1700);
+  setTimeout(() => layer.remove(), level === "record" ? 2400 : 1700);
 }
 
-// 新規保存時の演出本体。売却で利益が出たかを実現損益から判定して強弱を出す。
+function tryVibrate(pattern) {
+  if (typeof navigator.vibrate !== "function") return;
+  try {
+    navigator.vibrate(pattern);
+  } catch (_) {}
+}
+
+// この売り以外の過去の勝ちトレードの最高益を超えたか（＝単発実現益の自己ベスト更新）。
+// 初めての勝ちは「更新」とは呼ばないため、過去に勝ちが1件以上あることを条件にする。
+function isNewBestSingle(tradeId, pnl, records) {
+  let priorMax = -Infinity;
+  let priorWins = 0;
+  for (const r of records) {
+    if (r.tradeId === tradeId || !(r.pnl > 0)) continue;
+    priorWins += 1;
+    if (r.pnl > priorMax) priorMax = r.pnl;
+  }
+  return priorWins > 0 && pnl > priorMax;
+}
+
+// 自己ベスト更新の特別メッセージを伝説スタイルで一定時間表示する。
+function showRecordBubble() {
+  const bubble = $("mascot-bubble");
+  if (!bubble) return;
+  bubble.textContent = "🏆 自己ベスト更新！単発で過去いちばんの利益だよ、本当にすごい！";
+  bubble.className = "mascot-bubble legend";
+  recordBubbleUntil = Date.now() + 4500;
+  setTimeout(() => {
+    recordBubbleUntil = 0;
+    renderMascot(calcRealized(tradesForCalc()).records); // 通常コメントへ戻す
+  }, 4600);
+}
+
+// 新規保存時の演出本体。利確かどうか・自己ベスト更新かを実現損益から判定して強弱を出す。
 function celebrateSave(trade) {
   popMascot();
-  let strong = false;
+  let level = "normal";
   if (trade && trade.side === "売") {
     try {
       const { records } = calcRealized(tradesForCalc());
       const rec = records.find((r) => r.tradeId === trade.id);
-      strong = !!(rec && rec.pnl > 0);
+      if (rec && rec.pnl > 0) {
+        level = isNewBestSingle(trade.id, rec.pnl, records) ? "record" : "win";
+      }
     } catch (_) {
       /* 判定不能なら通常演出のまま */
     }
   }
-  launchConfetti(strong);
-  if (strong && typeof navigator.vibrate === "function") {
-    try {
-      navigator.vibrate(30);
-    } catch (_) {}
-  }
+  if (level === "record") showRecordBubble();
+  launchConfetti(level);
+  if (level === "record") tryVibrate([30, 40, 30]);
+  else if (level === "win") tryVibrate(30);
 }
 
 // 直近に保存・編集した取引id。renderList で該当行に flash クラスを付けて光らせる。
@@ -1367,14 +1458,9 @@ function onSubmit(ev) {
 function wireEvents() {
   $("seg").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-axis]");
-    if (!btn) return;
-    axis = btn.dataset.axis;
-    for (const b of $("seg").querySelectorAll("button")) {
-      b.classList.toggle("active", b === btn);
-      b.setAttribute("aria-pressed", b === btn ? "true" : "false");
-    }
-    renderAll();
+    if (btn) setAxis(btn.dataset.axis);
   });
+  enableAxisSwipe();
 
   $("add-toggle").addEventListener("click", () => openForm(null));
   $("form-cancel").addEventListener("click", closeForm);
