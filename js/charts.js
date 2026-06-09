@@ -5,18 +5,69 @@ import { cumulative, histogramBins } from "./pnl.js";
 
 let _chart = null;
 
-const GAIN = "#128a3a";
-const LOSS = "#d42f2f";
+// 損益色はCSS変数を単一の真実とし、チャートもそこから読む（表・リストと完全一致させる）。
+function lossGainColors() {
+  const fallback = { GAIN: "#128a3a", LOSS: "#d42f2f" };
+  if (typeof window === "undefined" || !document.documentElement) return fallback;
+  const s = getComputedStyle(document.documentElement);
+  return {
+    GAIN: s.getPropertyValue("--gain").trim() || fallback.GAIN,
+    LOSS: s.getPropertyValue("--loss").trim() || fallback.LOSS,
+  };
+}
+function reduceMotion() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
 
 // records: calcRealized().records を受け取り、累積系列を描画する
 export function renderCumulative(canvas, records) {
   if (typeof window === "undefined" || !window.Chart) return;
+  const { GAIN, LOSS } = lossGainColors();
   const series = cumulative(records);
 
   const labels = series.map((p) => p.date.slice(5)); // MM-DD
   const data = series.map((p) => p.cum);
   const last = data.length ? data[data.length - 1] : 0;
   const color = last >= 0 ? GAIN : LOSS;
+
+  // 登場アニメ: 線を左から1点ずつ描き進める（Chart.js公式のprogressive line方式）。
+  // reduce-motion時はアニメ無効で即時表示。
+  const totalDuration = 800;
+  const dl = totalDuration / Math.max(data.length, 1);
+  const lineAnimation = reduceMotion()
+    ? false
+    : {
+        x: {
+          type: "number",
+          easing: "linear",
+          duration: dl,
+          from: NaN,
+          delay(ctx) {
+            if (ctx.type !== "data" || ctx.xStarted) return 0;
+            ctx.xStarted = true;
+            return ctx.index * dl;
+          },
+        },
+        y: {
+          type: "number",
+          easing: "linear",
+          duration: dl,
+          from(ctx) {
+            if (ctx.index === 0) return ctx.chart.scales.y.getPixelForValue(data[0]);
+            const prev = ctx.chart.getDatasetMeta(ctx.datasetIndex).data[ctx.index - 1];
+            return prev ? prev.getProps(["y"], true).y : ctx.chart.scales.y.getPixelForValue(0);
+          },
+          delay(ctx) {
+            if (ctx.type !== "data" || ctx.yStarted) return 0;
+            ctx.yStarted = true;
+            return ctx.index * dl;
+          },
+        },
+      };
 
   if (_chart) {
     _chart.destroy();
@@ -50,6 +101,7 @@ export function renderCumulative(canvas, records) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: lineAnimation,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -101,9 +153,19 @@ export function renderHistogram(canvas, pnls) {
     return;
   }
 
+  const { GAIN, LOSS } = lossGainColors();
   const counts = bins.map((b) => b.count);
   const labels = bins.map((b) => shortYen(b.lo) + "〜" + shortYen(b.hi));
   const colors = bins.map((b) => (b.sign === "loss" ? LOSS : GAIN));
+
+  // 登場アニメ: 棒を左から順ににょきっと伸ばす。reduce-motion時は無効。
+  const barAnimation = reduceMotion()
+    ? false
+    : {
+        duration: 650,
+        easing: "easeOutQuart",
+        delay: (ctx) => (ctx.type === "data" && ctx.mode === "default" ? ctx.dataIndex * 70 : 0),
+      };
 
   _hist = new window.Chart(ctx, {
     type: "bar",
@@ -114,6 +176,7 @@ export function renderHistogram(canvas, pnls) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: barAnimation,
       plugins: {
         legend: { display: false },
         tooltip: {
