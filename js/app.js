@@ -598,44 +598,55 @@ function monthMascotState(records) {
 }
 
 // オリジナルSVGキャラ（外部画像なし＝PWAオフライン維持）。表情だけ差し替える。
+// 配色: ハニー(#EFC15A)。頭上のきらめき(アスタリスク)はClaudeyの目印。
 function mascotFace(mood) {
-  const coral = "#D97757";
-  const ink = "#3a2a22";
-  const spark = `<g stroke="${coral}" stroke-width="2.4" stroke-linecap="round">` +
-    `<line x1="36" y1="4" x2="36" y2="12"/>` +
-    `<line x1="31" y1="6.5" x2="41" y2="11.5"/>` +
-    `<line x1="41" y1="6.5" x2="31" y2="11.5"/></g>`;
-  const body = `<rect x="13" y="15" width="46" height="44" rx="19" fill="${coral}"/>`;
+  const body = "#EFC15A"; // 体（やさしい黄色）
+  const edge = "#D9A23A"; // きらめき・縁
+  const ink = "#3b2a23";
+  const cheek = "#FF9E7D";
+  // 頭の上のきらめき（Anthropicのアスタリスク風）
+  const spark = `<g transform="translate(36 9)" stroke="${edge}" stroke-width="2.6" stroke-linecap="round">` +
+    `<line x1="0" y1="-6.5" x2="0" y2="6.5"/>` +
+    `<line x1="-5.6" y1="-3.2" x2="5.6" y2="3.2"/>` +
+    `<line x1="5.6" y1="-3.2" x2="-5.6" y2="3.2"/></g>`;
+  const blob = `<rect x="12" y="20" width="48" height="42" rx="21" fill="${body}"/>`;
+  const cheeks = `<ellipse cx="22.5" cy="46" rx="4.3" ry="3" fill="${cheek}" opacity=".7"/>` +
+    `<ellipse cx="49.5" cy="46" rx="4.3" ry="3" fill="${cheek}" opacity=".7"/>`;
+  // ハイライト付きの目（うるうる）
+  const eye = (cx, cy, r) =>
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${ink}"/>` +
+    `<circle cx="${cx - r * 0.35}" cy="${cy - r * 0.45}" r="${r * 0.38}" fill="#fff"/>`;
   let eyes;
   let mouth;
   let extra = "";
-  const eyeDots = (r) =>
-    `<circle cx="29" cy="37" r="${r}" fill="${ink}"/><circle cx="43" cy="37" r="${r}" fill="${ink}"/>`;
   switch (mood) {
     case "great":
-      eyes = `<path d="M26 38 q3 -4.5 6 0" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linecap="round"/>` +
-        `<path d="M40 38 q3 -4.5 6 0" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linecap="round"/>`;
-      mouth = `<path d="M28 44 q8 11 16 0 q-8 3 -16 0 z" fill="${ink}"/>`;
-      extra = `<circle cx="22" cy="45" r="3" fill="#ff9d7a" opacity=".65"/>` +
-        `<circle cx="50" cy="45" r="3" fill="#ff9d7a" opacity=".65"/>`;
+      eyes = `<path d="M24.5 40 q3.5 -5.5 7 0" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>` +
+        `<path d="M40.5 40 q3.5 -5.5 7 0" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`;
+      mouth = `<path d="M27 46 q9 11 18 0 q-9 4 -18 0 z" fill="${ink}"/>`;
+      extra = `<g fill="#FFD36B"><circle cx="13" cy="24" r="1.8"/><circle cx="59" cy="28" r="1.8"/>` +
+        `<circle cx="56" cy="18" r="1.2"/></g>`;
       break;
     case "good":
-      eyes = eyeDots(3);
-      mouth = `<path d="M29 45 q7 6 14 0" fill="none" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/>`;
+      eyes = eye(28, 39, 4) + eye(44, 39, 4);
+      mouth = `<path d="M28.5 47 q7.5 7 15 0" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`;
       break;
     case "flat":
-      eyes = eyeDots(3);
-      mouth = `<line x1="31" y1="47" x2="41" y2="47" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/>`;
+      eyes = eye(28, 39, 3.8) + eye(44, 39, 3.8);
+      mouth = `<line x1="31" y1="49" x2="41" y2="49" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`;
       break;
     case "down":
-      eyes = eyeDots(2.7);
-      mouth = `<path d="M30 48 q6 -5 12 0" fill="none" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/>`;
+      eyes = eye(28, 40.5, 3.5) + eye(44, 40.5, 3.5) +
+        `<path d="M23.5 35.5 L31 32.5" fill="none" stroke="${ink}" stroke-width="2" stroke-linecap="round"/>` +
+        `<path d="M41 32.5 L48.5 35.5" fill="none" stroke="${ink}" stroke-width="2" stroke-linecap="round"/>`;
+      mouth = `<path d="M31 51 q5 3.5 10 0" fill="none" stroke="${ink}" stroke-width="2.8" stroke-linecap="round"/>`;
+      extra = `<path d="M50.5 44 q2.3 4.2 0 7.2 q-2.3 -3 0 -7.2 z" fill="#7FC9FF" opacity=".85"/>`;
       break;
     default: // none（今月まだ確定なし）= きょとん
-      eyes = eyeDots(3);
-      mouth = `<path d="M31 46 q5 2.5 10 0" fill="none" stroke="${ink}" stroke-width="2.4" stroke-linecap="round"/>`;
+      eyes = eye(28, 39, 4.2) + eye(44, 39, 4.2);
+      mouth = `<ellipse cx="36" cy="49" rx="2.4" ry="2.8" fill="${ink}"/>`;
   }
-  return `<svg viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">${spark}${body}${extra}${eyes}${mouth}</svg>`;
+  return `<svg viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">${spark}${blob}${cheeks}${extra}${eyes}${mouth}</svg>`;
 }
 
 // 通常コメント（区分ごと・励まし寄り）。毎回ランダムに1つ選ぶ。
