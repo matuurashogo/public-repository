@@ -75,12 +75,12 @@ body {
 
 /* マスコット（Claudey） */
 .summary-hero { display: flex; align-items: center; justify-content: center;
-                gap: 8px; margin-bottom: 4px; }
+                gap: 8px; margin-bottom: 4px; position: relative; }
 .summary-hero .summary-main { margin-bottom: 0; flex: 0 1 auto; min-width: 0; }
 .mascot { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center;
           gap: 4px; max-width: 44%; }
 .mascot-figure { width: 60px; height: 60px; flex: 0 0 auto;
-                 transition: transform .25s ease; }
+                 transition: transform .25s ease; animation: mascot-float 4s ease-in-out infinite; }
 .mascot-figure svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .mascot[data-mood="great"] .mascot-figure { animation: mascot-bounce .6s ease both; }
 .mascot[data-mood="down"]  .mascot-figure { transform: translateY(1px); }
@@ -88,6 +88,29 @@ body {
   0% { transform: translateY(0); } 30% { transform: translateY(-6px); }
   55% { transform: translateY(0); } 75% { transform: translateY(-3px); }
   100% { transform: translateY(0); }
+}
+/* アイドルの“生きてる感”: ふわっと上下／ときどき瞬き／きらめきの脈動 */
+@keyframes mascot-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2.5px); } }
+.mascot-eyes { transform-box: fill-box; transform-origin: center; animation: blink 4.4s ease-in-out infinite; }
+@keyframes blink { 0%, 90%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.12); } }
+.mascot-spark { animation: spark-pulse 2.6s ease-in-out infinite; }
+@keyframes spark-pulse { 0%, 100% { opacity: .8; } 50% { opacity: 1; } }
+/* 保存時のポップ（great時の bounce より後に定義して優先させる）*/
+.mascot.pop .mascot-figure { animation: mascot-bounce .55s ease both; }
+/* 紙吹雪（保存ごほうび。内製・オフライン維持）*/
+.confetti-layer { position: absolute; inset: 0; pointer-events: none; overflow: visible; z-index: 5; }
+.confetti-piece { position: absolute; top: -8px; width: 7px; height: 10px; border-radius: 2px;
+                  opacity: .95; animation: confetti-fall ease-in forwards; }
+@keyframes confetti-fall {
+  0% { transform: translateY(-10px) rotate(0); opacity: 0; }
+  12% { opacity: 1; }
+  100% { transform: translateY(130px) rotate(240deg); opacity: 0; }
+}
+/* モーション控えめ設定では全演出を停止し、即時最終状態にする */
+@media (prefers-reduced-motion: reduce) {
+  .mascot-figure, .mascot-eyes, .mascot-spark,
+  .mascot[data-mood="great"] .mascot-figure, .mascot.pop .mascot-figure { animation: none !important; }
+  .confetti-piece { display: none !important; }
 }
 .mascot-bubble { position: relative; max-width: 150px; font-size: 11.5px; line-height: 1.35;
                  font-weight: 600; color: #3a3a3e; background: #f4f4f6; border: 1px solid #e6e6ea;
