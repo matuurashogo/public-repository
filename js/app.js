@@ -176,6 +176,7 @@ function renderAll() {
   // 計算時の警告（保有超過売却）＋データ全体の整合警告（口座混在の同時保有）を併せて表示
   renderWarnings(warnings.concat(accountMixWarnings(trades)));
   renderSummary(records);
+  renderMascot(records);
   renderHoldings(holdings);
   renderKpis();
   renderTagBreakdown();
@@ -570,6 +571,167 @@ function renderSummary(records) {
       );
     })
     .join("");
+}
+
+// ---------- マスコット（Claudey） ----------
+// 今月の「確定損益（税引前）」に応じて表情を出し分け、コメントは毎回ランダムで表示する。
+// しきい値は後から調整しやすいよう定数化（円）。
+const MASCOT_BIG_WIN = 100000; // この額以上の確定益で「大勝ち」
+const MASCOT_BIG_LOSS = -100000; // この額以下の確定損で「大負け（寄り添い）」
+
+function currentMonthKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// 今月の確定損益から { tier(コメント区分), face(表情), gross } を返す
+function monthMascotState(records) {
+  const key = currentMonthKey();
+  const row = aggregate(records, "month").find((r) => r.key === key);
+  if (!row) return { tier: "none", face: "none", gross: null };
+  const g = row.gross;
+  if (g >= MASCOT_BIG_WIN) return { tier: "great", face: "great", gross: g };
+  if (g > 0) return { tier: "good", face: "good", gross: g };
+  if (g === 0) return { tier: "flat", face: "flat", gross: g };
+  if (g > MASCOT_BIG_LOSS) return { tier: "down", face: "down", gross: g };
+  return { tier: "bigdown", face: "down", gross: g };
+}
+
+// オリジナルSVGキャラ（外部画像なし＝PWAオフライン維持）。表情だけ差し替える。
+function mascotFace(mood) {
+  const coral = "#D97757";
+  const ink = "#3a2a22";
+  const spark = `<g stroke="${coral}" stroke-width="2.4" stroke-linecap="round">` +
+    `<line x1="36" y1="4" x2="36" y2="12"/>` +
+    `<line x1="31" y1="6.5" x2="41" y2="11.5"/>` +
+    `<line x1="41" y1="6.5" x2="31" y2="11.5"/></g>`;
+  const body = `<rect x="13" y="15" width="46" height="44" rx="19" fill="${coral}"/>`;
+  let eyes;
+  let mouth;
+  let extra = "";
+  const eyeDots = (r) =>
+    `<circle cx="29" cy="37" r="${r}" fill="${ink}"/><circle cx="43" cy="37" r="${r}" fill="${ink}"/>`;
+  switch (mood) {
+    case "great":
+      eyes = `<path d="M26 38 q3 -4.5 6 0" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linecap="round"/>` +
+        `<path d="M40 38 q3 -4.5 6 0" fill="none" stroke="${ink}" stroke-width="2.5" stroke-linecap="round"/>`;
+      mouth = `<path d="M28 44 q8 11 16 0 q-8 3 -16 0 z" fill="${ink}"/>`;
+      extra = `<circle cx="22" cy="45" r="3" fill="#ff9d7a" opacity=".65"/>` +
+        `<circle cx="50" cy="45" r="3" fill="#ff9d7a" opacity=".65"/>`;
+      break;
+    case "good":
+      eyes = eyeDots(3);
+      mouth = `<path d="M29 45 q7 6 14 0" fill="none" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/>`;
+      break;
+    case "flat":
+      eyes = eyeDots(3);
+      mouth = `<line x1="31" y1="47" x2="41" y2="47" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/>`;
+      break;
+    case "down":
+      eyes = eyeDots(2.7);
+      mouth = `<path d="M30 48 q6 -5 12 0" fill="none" stroke="${ink}" stroke-width="2.6" stroke-linecap="round"/>`;
+      break;
+    default: // none（今月まだ確定なし）= きょとん
+      eyes = eyeDots(3);
+      mouth = `<path d="M31 46 q5 2.5 10 0" fill="none" stroke="${ink}" stroke-width="2.4" stroke-linecap="round"/>`;
+  }
+  return `<svg viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">${spark}${body}${extra}${eyes}${mouth}</svg>`;
+}
+
+// 通常コメント（区分ごと・励まし寄り）。毎回ランダムに1つ選ぶ。
+const MASCOT_NORMAL = {
+  none: [
+    "今月はこれから！まっさらな帳簿、いい予感がするよ📓",
+    "ノーポジは最強のポジション、なんてね。出番を待ってる！",
+    "今月の一手目、楽しみにしてるよ🙌",
+    "焦らず、いい球が来るまで待とう⚾",
+    "まだ何も確定してないけど、君の判断を信じてる！",
+  ],
+  great: [
+    "今月、絶好調じゃないか！その調子だ🔥",
+    "ナイストレード！利益はちゃんと自分を褒めてあげて🎉",
+    "読みがバチッとハマったね、お見事！",
+    "勝ってる時こそ平常心。でも今日は素直に喜ぼう✨",
+    "君のシナリオ通り。実力だよ、これは💪",
+    "最高の月になってきた！この勢い、大事にしよう🚀",
+  ],
+  good: [
+    "プラスで終えられてるの、立派だよ👍",
+    "コツコツが一番強い。いい積み上げだね",
+    "勝ちは勝ち！小さくても胸を張っていこう😊",
+    "着実だね。淡々と続けるのが正解だよ",
+    "うん、いい流れ。次も自分のルールで🙆",
+  ],
+  flat: [
+    "トントン、悪くないよ。退場しないのが何より大事",
+    "プラマイゼロは「生き残った」ってこと。十分えらい",
+    "守りきった月。資金が残れば次がある🛡️",
+    "焦って動かなかった君、ナイス我慢！",
+  ],
+  down: [
+    "今月はちょっと向かい風。でも大丈夫、想定内さ🍃",
+    "負けは授業料。次に活きるよ、必ず",
+    "ドローダウンは誰にでもある。淡々といこう",
+    "大きく崩れてないのが偉い。リスク管理できてる証拠だよ",
+    "深呼吸。ルール通りなら胸を張っていい🌱",
+  ],
+  bigdown: [
+    "しんどい月だったね。でも、君はちゃんと記録を続けてる。それが回復への第一歩だよ",
+    "大きく引いた時こそ、一回休んでもいい。相場は逃げない🌙",
+    "今日の痛みは、未来の君の糧になる。一緒に立て直そう",
+    "数字は厳しいけど、君の価値は損益じゃ決まらないよ。また明日やろう",
+    "退場しなければ、いつでも巻き返せる。まずは深呼吸から🫧",
+  ],
+};
+
+// 激レア（出現確率低め）。区分ごとに用意。
+const MASCOT_RARE = {
+  none: ["……静寂。嵐の前の、ね。⚡（激レア）"],
+  great: [
+    "うおおお爆益！画面の前で握手しよう🤝✨（激レア）",
+    "本日の主人公は、まちがいなく君だ🏆（激レア）",
+  ],
+  good: ["勝ちトレード、こっそりハイタッチ🙏（激レア）"],
+  flat: ["完全なるイーブン。職人技だね…🧘（激レア）"],
+  down: ["転んでもタダでは起きない君が好きだよ🔁（激レア）"],
+  bigdown: ["こんな日もある。明日の君に、そっとエールを置いておくね🕯️（激レア）"],
+};
+
+// 伝説（超激レア・区分共通）。出会えたらラッキー。
+const MASCOT_LEGENDARY = [
+  "🌈 伝説コメント 🌈 …君に会えて光栄だ。今日は記念日にしよう。",
+  "✨LEGENDARY✨ この瞬間に立ち会えたのは0.5%の幸運。スクショ推奨！📸",
+  "👑 帳簿の神が微笑んだ。何が起きても、今日は良い日だ。",
+  "🪄 こっそり魔法をかけておいた。次のトレード、ちょっとだけ追い風かも。",
+];
+
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// レア度抽選つきコメント選択
+function pickMascotComment(tier) {
+  const r = Math.random();
+  if (r < 0.01 && MASCOT_LEGENDARY.length) {
+    return { text: pickRandom(MASCOT_LEGENDARY), rarity: "legend" };
+  }
+  const rare = MASCOT_RARE[tier] || [];
+  if (r < 0.07 && rare.length) {
+    return { text: pickRandom(rare), rarity: "rare" };
+  }
+  return { text: pickRandom(MASCOT_NORMAL[tier] || MASCOT_NORMAL.none), rarity: "normal" };
+}
+
+function renderMascot(records) {
+  const el = $("mascot");
+  if (!el) return;
+  const st = monthMascotState(records);
+  el.dataset.mood = st.face;
+  $("mascot-figure").innerHTML = mascotFace(st.face);
+  const c = pickMascotComment(st.tier);
+  const bubble = $("mascot-bubble");
+  bubble.textContent = c.text;
+  bubble.className = "mascot-bubble" + (c.rarity !== "normal" ? " " + c.rarity : "");
 }
 
 function renderList(trades, records) {
