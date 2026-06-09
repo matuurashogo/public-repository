@@ -520,6 +520,37 @@ function monthLabel(key) {
   return `${y}年${Number(m)}月`;
 }
 
+// モーション控えめ設定（OS/ブラウザの reduce-motion を尊重）。演出はこれを必ず通す。
+function prefersReducedMotion() {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// ヒーロー金額のカウントアップ。前回値→目標値を easeOutCubic で約450msトゥイーン。
+// reduce-motion時・同値・初回は即時確定。タブ高速切替に備えトークンで前アニメを打ち切る。
+let lastHeroMain = 0;
+let heroAnimToken = 0;
+function animateHeroValue(hv, target) {
+  const yen = '<span class="yen">円</span>';
+  const from = lastHeroMain;
+  lastHeroMain = target;
+  const token = ++heroAnimToken;
+  if (prefersReducedMotion() || from === target) {
+    hv.innerHTML = formatYen(target) + yen;
+    return;
+  }
+  const dur = 450;
+  const t0 = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+  function frame(now) {
+    if (token !== heroAnimToken) return; // 新しい描画に取って代わられた
+    const p = Math.min(1, (now - t0) / dur);
+    hv.innerHTML = formatYen(from + (target - from) * ease(p)) + yen;
+    if (p < 1) requestAnimationFrame(frame);
+    else hv.innerHTML = formatYen(target) + yen;
+  }
+  requestAnimationFrame(frame);
+}
+
 function renderSummary(records) {
   const isYear = axis === "year";
   const rows = aggregate(records, axis, codeToName);
@@ -541,7 +572,7 @@ function renderSummary(records) {
   $("hero-label").textContent = `${heroPeriod} ${isYear ? "税引後損益" : "損益"}`;
   const hv = $("hero-value");
   hv.className = "value " + gainLossClass(heroMain);
-  hv.innerHTML = `${formatYen(heroMain)}<span class="yen">円</span>`;
+  animateHeroValue(hv, heroMain); // 0→目標へカウントアップ（reduce-motion時は即時）
 
   // サブ（税引前 / 概算税）は年タブのみ表示。月・銘柄タブでは非表示。
   const sub = document.querySelector(".summary-sub");
@@ -628,7 +659,7 @@ function mascotFace(mood) {
   const ink = "#3b2a23";
   const cheek = "#FF9E7D";
   // 頭の上のきらめき（Anthropicのアスタリスク風）
-  const spark = `<g transform="translate(36 9)" stroke="${edge}" stroke-width="2.6" stroke-linecap="round">` +
+  const spark = `<g class="mascot-spark" transform="translate(36 9)" stroke="${edge}" stroke-width="2.6" stroke-linecap="round">` +
     `<line x1="0" y1="-6.5" x2="0" y2="6.5"/>` +
     `<line x1="-5.6" y1="-3.2" x2="5.6" y2="3.2"/>` +
     `<line x1="5.6" y1="-3.2" x2="-5.6" y2="3.2"/></g>`;
@@ -669,7 +700,7 @@ function mascotFace(mood) {
       eyes = eye(28, 39, 4.2) + eye(44, 39, 4.2);
       mouth = `<ellipse cx="36" cy="49" rx="2.4" ry="2.8" fill="${ink}"/>`;
   }
-  return `<svg viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">${spark}${blob}${cheeks}${extra}${eyes}${mouth}</svg>`;
+  return `<svg viewBox="0 0 72 72" xmlns="http://www.w3.org/2000/svg">${spark}${blob}${cheeks}${extra}<g class="mascot-eyes">${eyes}</g>${mouth}</svg>`;
 }
 
 // 通常コメント（区分ごと・励まし寄り）。毎回ランダムに1つ選ぶ。
@@ -775,6 +806,59 @@ function renderMascot(records) {
   const bubble = $("mascot-bubble");
   bubble.textContent = c.text;
   bubble.className = "mascot-bubble" + (c.rarity !== "normal" ? " " + c.rarity : "");
+}
+
+// 保存時のごほうび演出。Claudeyを一度跳ねさせ、ハニー色の紙吹雪を舞わせる。
+// 勝ち（利益が出た売却）のときだけ豪華にし、軽い触覚フィードバックも添える。
+// すべて内製SVG/CSSで完結（外部アセットなし＝オフラインPWA維持）。
+function popMascot() {
+  const m = $("mascot");
+  if (!m || prefersReducedMotion()) return;
+  m.classList.remove("pop");
+  void m.offsetWidth; // リフローで連続保存でも再生し直す
+  m.classList.add("pop");
+  setTimeout(() => m.classList.remove("pop"), 650);
+}
+
+function launchConfetti(strong) {
+  if (prefersReducedMotion()) return;
+  const host = document.querySelector(".summary-hero") || document.body;
+  const layer = document.createElement("div");
+  layer.className = "confetti-layer";
+  const colors = ["#EFC15A", "#D9A23A", "#FFD36B", "#FF9E7D", "#7FC9FF"];
+  const count = strong ? 26 : 14;
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement("span");
+    p.className = "confetti-piece";
+    p.style.left = Math.random() * 100 + "%";
+    p.style.background = colors[i % colors.length];
+    p.style.animationDelay = Math.random() * 0.15 + "s";
+    p.style.animationDuration = 0.9 + Math.random() * 0.5 + "s";
+    layer.appendChild(p);
+  }
+  host.appendChild(layer);
+  setTimeout(() => layer.remove(), 1700);
+}
+
+// 新規保存時の演出本体。売却で利益が出たかを実現損益から判定して強弱を出す。
+function celebrateSave(trade) {
+  popMascot();
+  let strong = false;
+  if (trade && trade.side === "売") {
+    try {
+      const { records } = calcRealized(tradesForCalc());
+      const rec = records.find((r) => r.tradeId === trade.id);
+      strong = !!(rec && rec.pnl > 0);
+    } catch (_) {
+      /* 判定不能なら通常演出のまま */
+    }
+  }
+  launchConfetti(strong);
+  if (strong && typeof navigator.vibrate === "function") {
+    try {
+      navigator.vibrate(30);
+    } catch (_) {}
+  }
 }
 
 function renderList(trades, records) {
@@ -1264,10 +1348,10 @@ function onSubmit(ev) {
     trade.entryTag = null;
     trade.entryNote = null;
   }
-  if (editingId) store.updateTrade(editingId, trade);
-  else store.addTrade(trade);
+  const saved = editingId ? store.updateTrade(editingId, trade) : store.addTrade(trade);
   closeForm();
   renderAll();
+  if (!editingId && saved) celebrateSave(saved); // 新規追加のみ祝う（編集は静かに）
   saveToDrive();
   refreshIndicators(); // 新しい買い銘柄のスナップショットを取りに行く
 }
