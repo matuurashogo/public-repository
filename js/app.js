@@ -514,27 +514,50 @@ function renderKpis() {
   renderHistogram($("hist-chart"), k.pnls);
 }
 
-function renderSummary(records) {
-  const years = aggregate(records, "year");
-  const thisYear = String(new Date().getFullYear());
-  const hero = years[0] || { key: thisYear, gross: 0, tax: 0, net: 0 };
+// 月キー(YYYY-MM)を「YYYY年M月」表記に整形する。
+function monthLabel(key) {
+  const [y, m] = key.split("-");
+  return `${y}年${Number(m)}月`;
+}
 
-  $("hero-label").textContent = `${hero.key}年 税引後損益`;
+function renderSummary(records) {
+  const isYear = axis === "year";
+  const rows = aggregate(records, axis, codeToName);
+
+  // ヒーロー（大きい数字）は「選択中タブの先頭バケット」にフォーカスする。
+  //   年→最新年 / 月→最新月 / 銘柄→損益トップ銘柄
+  const fallbackKey =
+    axis === "month" ? currentMonthKey() : axis === "code" ? null : String(new Date().getFullYear());
+  const hero = rows[0] || { key: fallbackKey, gross: 0, tax: 0, net: 0, rate: null, name: null };
+
+  // 先頭バケットの見出し
+  let heroPeriod;
+  if (axis === "year") heroPeriod = `${hero.key}年`;
+  else if (axis === "month") heroPeriod = hero.key ? monthLabel(hero.key) : "—";
+  else heroPeriod = hero.name ? `${hero.name}（${hero.key}）` : hero.key || "—";
+
+  // 大きい数字: 年は税引後、月・銘柄は税引前（税は年単位でのみ意味を持つため）
+  const heroMain = isYear ? hero.net : hero.gross;
+  $("hero-label").textContent = `${heroPeriod} ${isYear ? "税引後損益" : "損益"}`;
   const hv = $("hero-value");
-  hv.className = "value " + gainLossClass(hero.net);
-  hv.innerHTML = `${formatYen(hero.net)}<span class="yen">円</span>`;
-  const hg = $("hero-gross");
-  hg.className = "v " + gainLossClass(hero.gross);
-  hg.innerHTML =
-    formatYen(hero.gross) +
-    (hero.rate != null ? ` <span class="rate">(${formatPct(hero.rate)})</span>` : "");
-  $("hero-tax").textContent = hero.tax > 0 ? "−" + hero.tax.toLocaleString("ja-JP") : "0";
+  hv.className = "value " + gainLossClass(heroMain);
+  hv.innerHTML = `${formatYen(heroMain)}<span class="yen">円</span>`;
+
+  // サブ（税引前 / 概算税）は年タブのみ表示。月・銘柄タブでは非表示。
+  const sub = document.querySelector(".summary-sub");
+  if (sub) sub.style.display = isYear ? "" : "none";
+  if (isYear) {
+    const hg = $("hero-gross");
+    hg.className = "v " + gainLossClass(hero.gross);
+    hg.innerHTML =
+      formatYen(hero.gross) +
+      (hero.rate != null ? ` <span class="rate">(${formatPct(hero.rate)})</span>` : "");
+    $("hero-tax").textContent = hero.tax > 0 ? "−" + hero.tax.toLocaleString("ja-JP") : "0";
+  }
 
   // 集計表
   // 申告分離課税は年単位・全銘柄通算後のネットにかかるため、税額は「年」軸でのみ表示する。
   // 月別・銘柄別は誤解を避けて税引前のみ表示する。
-  const isYear = axis === "year";
-  const rows = aggregate(records, axis, codeToName);
   const thead = $("summary-table").querySelector("thead");
   const tbody = $("summary-table").querySelector("tbody");
   const note = $("summary-note");
@@ -574,7 +597,7 @@ function renderSummary(records) {
 }
 
 // ---------- マスコット（Claudey） ----------
-// 今月の「確定損益（税引前）」に応じて表情を出し分け、コメントは毎回ランダムで表示する。
+// 今月の「確定損益（税引前）」に応じて表情を出し分け、コメントは起動ごとに一度だけ抽選する。
 // しきい値は後から調整しやすいよう定数化（円）。
 const MASCOT_BIG_WIN = 100000; // この額以上の確定益で「大勝ち」
 const MASCOT_BIG_LOSS = -100000; // この額以下の確定損で「大負け（寄り添い）」
@@ -733,13 +756,22 @@ function pickMascotComment(tier) {
   return { text: pickRandom(MASCOT_NORMAL[tier] || MASCOT_NORMAL.none), rarity: "normal" };
 }
 
+// コメントは起動ごとに一度だけ抽選してキャッシュする。
+// タブ切替（renderAll の再描画）では引き直さず、今月の状況(tier)が実際に変わったとき
+// （取引の追加・削除など）だけ引き直して整合させる。
+let mascotCommentCache = null; // { tier, text, rarity }
+
 function renderMascot(records) {
   const el = $("mascot");
   if (!el) return;
   const st = monthMascotState(records);
   el.dataset.mood = st.face;
   $("mascot-figure").innerHTML = mascotFace(st.face);
-  const c = pickMascotComment(st.tier);
+  if (!mascotCommentCache || mascotCommentCache.tier !== st.tier) {
+    const picked = pickMascotComment(st.tier);
+    mascotCommentCache = { tier: st.tier, text: picked.text, rarity: picked.rarity };
+  }
+  const c = mascotCommentCache;
   const bubble = $("mascot-bubble");
   bubble.textContent = c.text;
   bubble.className = "mascot-bubble" + (c.rarity !== "normal" ? " " + c.rarity : "");
