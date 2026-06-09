@@ -34,9 +34,16 @@
       <button data-axis="month" class="active" aria-pressed="true">月間</button>
       <button data-axis="code" aria-pressed="false">銘柄別</button>
     </div>
-    <div class="summary-main">
-      <div class="label" id="hero-label">税引後損益</div>
-      <div class="value" id="hero-value">±0<span class="yen">円</span></div>
+    <div class="summary-hero">
+      <div class="summary-main">
+        <div class="label" id="hero-label">税引後損益</div>
+        <div class="value" id="hero-value">±0<span class="yen">円</span></div>
+      </div>
+      <!-- マスコット（Claudey）: 今月の確定損益に応じて表情とコメントが変化 -->
+      <div class="mascot" id="mascot" data-mood="none">
+        <div class="mascot-bubble" id="mascot-bubble" role="status" aria-live="polite"></div>
+        <div class="mascot-figure" id="mascot-figure" aria-hidden="true"></div>
+      </div>
     </div>
     <div class="summary-sub">
       <div><div class="k">税引前</div><div class="v" id="hero-gross">±0</div></div>
