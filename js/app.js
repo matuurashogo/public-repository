@@ -861,6 +861,10 @@ function celebrateSave(trade) {
   }
 }
 
+// 直近に保存・編集した取引id。renderList で該当行に flash クラスを付けて光らせる。
+// onSubmit がタイムアウトで解除するまで保持し、保存直後の再描画でもハイライトを維持する。
+let flashTradeId = null;
+
 function renderList(trades, records) {
   const pnlById = {};
   const rateById = {};
@@ -920,7 +924,7 @@ function renderList(trades, records) {
         : "";
 
       return (
-        `<div class="trade">` +
+        `<div class="trade${t.id === flashTradeId ? " flash" : ""}" data-id="${t.id}">` +
         `<div class="left">` +
         `<div class="name">${name}<span class="code">${esc(t.code)}</span>${nisa}</div>` +
         `<div class="meta">${meta}</div>${tagBadge}${snapLine}${outcomeLine}</div>` +
@@ -1349,9 +1353,12 @@ function onSubmit(ev) {
     trade.entryNote = null;
   }
   const saved = editingId ? store.updateTrade(editingId, trade) : store.addTrade(trade);
+  flashTradeId = saved ? saved.id : null; // 保存した行を一瞬ハイライト（新規・編集とも）
   closeForm();
   renderAll();
   if (!editingId && saved) celebrateSave(saved); // 新規追加のみ祝う（編集は静かに）
+  // 保存直後は指標取得などで再描画が走るため、少しの間フラッシュ対象を保持して光らせ続ける
+  if (flashTradeId) setTimeout(() => { flashTradeId = null; }, 1200);
   saveToDrive();
   refreshIndicators(); // 新しい買い銘柄のスナップショットを取りに行く
 }
