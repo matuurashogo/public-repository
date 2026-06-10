@@ -71,6 +71,18 @@
     <p id="holdings-note" class="summary-note"></p>
   </section>
 
+  <!-- 買い時ボード（TBK-0006）: 監視リスト銘柄の「あといくら下がったら買いか」 -->
+  <section class="card" id="buylevels-card" hidden>
+    <div class="card-title">買い時ボード <span class="card-sub" id="buylevels-date"></span></div>
+    <div class="table-scroll">
+      <table id="buylevels-table">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="summary-note">監視リスト銘柄の買い目標価格（調整後終値ベース・翌朝の指値の目安）。🟢=到達 / 🟡=接近（あと3%以内）/ ↗=陽転（下げ止まり確認）。</p>
+  </section>
+
   <!-- トレード成績（KPI） -->
   <section class="card">
     <div class="card-title">トレード成績（KPI）<span class="card-sub">今年</span></div>

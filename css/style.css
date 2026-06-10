@@ -339,3 +339,19 @@ td.muted { color: #b0b0b5; }
 #tag-breakdown-table td:first-child { text-align: left; font-weight: 600; }
 #tag-breakdown-table .table-empty { text-align: center; color: #b0b0b5; padding: 14px 0; }
 .bd-sub { font-size: 11px; color: #8a8a8e; margin-top: 2px; }
+
+/* 買い時ボード（TBK-0006） */
+#buylevels-table th, #buylevels-table td { text-align: center; }
+#buylevels-table th.bl-name, #buylevels-table td.bl-name { text-align: left; }
+.bl-name { font-weight: 600; white-space: nowrap; }
+.bl-stock-name { display: block; font-size: 10px; color: #8a8a8e; font-weight: 500; max-width: 88px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bl-close { font-weight: 600; white-space: nowrap; }
+.bl-rebound { color: var(--gain); margin-left: 2px; font-weight: 700; }
+.bl-cell { white-space: nowrap; }
+.bl-price { display: block; font-size: 12.5px; }
+.bl-dist { display: block; font-size: 10px; color: #8a8a8e; }
+.bl-hit { background: #e6f7ec; border-radius: 8px; }
+.bl-hit .bl-dist { color: #1e8e4a; font-weight: 700; }
+.bl-near { background: #fdf3dc; border-radius: 8px; }
+.bl-near .bl-dist { color: #8a5a00; font-weight: 700; }
