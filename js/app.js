@@ -16,7 +16,7 @@ import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagB
 import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus, latestIndicatorDate, isEntryDataReady, getRows, computeEntryOutcome } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
-import { loadBuyLevels, renderBuyLevels } from "./buylevels.js";
+import { loadBuyLevels, renderBuyLevels, getBuyLevels } from "./buylevels.js";
 
 const store = new Store();
 let axis = "month"; // year | month | code
@@ -1119,6 +1119,45 @@ function todayLocalISO() {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+// ---------- 監視銘柄の編集（買い時ボード・TBK-0007） ----------
+function renderWatchChips() {
+  const wrap = $("bl-watch-chips");
+  const codes = store.getWatchlist();
+  if (codes.length === 0) {
+    wrap.innerHTML = '<span class="summary-note">監視銘柄がありません。下の検索から追加してください。</span>';
+    return;
+  }
+  wrap.innerHTML = codes
+    .map((code) => {
+      const name = codeToName(code);
+      return (
+        `<span class="bl-watch-chip">${esc(code)}` +
+        (name ? `<span class="bl-watch-chip-name">${esc(name)}</span>` : "") +
+        `<button type="button" data-watch-del="${esc(code)}" aria-label="${esc(code)} を監視から外す">×</button></span>`
+      );
+    })
+    .join("");
+}
+
+function hideWatchSuggest() {
+  const list = $("bl-watch-suggest");
+  list.hidden = true;
+  list.innerHTML = "";
+}
+
+function renderWatchSuggest(query) {
+  const list = $("bl-watch-suggest");
+  const items = searchStocks(query, 6);
+  if (!String(query || "").trim() || items.length === 0) {
+    hideWatchSuggest();
+    return;
+  }
+  list.innerHTML = items
+    .map((e) => `<li data-watch-add="${esc(e.code)}"><span>${esc(e.name || "")}</span><span>${esc(e.code)}</span></li>`)
+    .join("");
+  list.hidden = false;
+}
+
 function openForm(trade) {
   editingId = trade ? trade.id : null;
   $("form-title").textContent = trade ? "取引を編集" : "取引を追加";
@@ -1529,6 +1568,45 @@ function wireEvents() {
   // フォーム外タップでサジェストを閉じる
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".suggest-wrap")) hideSuggest();
+    if (!e.target.closest(".bl-watch-add")) hideWatchSuggest();
+  });
+
+  // ---- 監視銘柄の編集（買い時ボード・TBK-0007）----
+  $("bl-watch-toggle").addEventListener("click", () => {
+    const editor = $("bl-watch-editor");
+    editor.hidden = !editor.hidden;
+    $("bl-watch-toggle").textContent = editor.hidden ? "監視銘柄を編集" : "編集を閉じる";
+    if (!editor.hidden) {
+      // 初回はボードの現銘柄をシードする（既存の監視銘柄を失わないため。TBK-0007）
+      if (store.getWatchlist().length === 0) {
+        const payload = getBuyLevels();
+        const codes = payload && payload.stocks ? payload.stocks.map((s) => s.code) : [];
+        if (codes.length) {
+          store.setWatchlist(codes);
+          saveToDrive();
+        }
+      }
+      renderWatchChips();
+    }
+  });
+  $("bl-watch-input").addEventListener("input", (e) => renderWatchSuggest(e.target.value));
+  $("bl-watch-suggest").addEventListener("click", (e) => {
+    const li = e.target.closest("li[data-watch-add]");
+    if (!li) return;
+    if (store.addWatchCode(li.dataset.watchAdd)) {
+      renderWatchChips();
+      saveToDrive();
+    }
+    $("bl-watch-input").value = "";
+    hideWatchSuggest();
+  });
+  $("bl-watch-chips").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-watch-del]");
+    if (!btn) return;
+    if (store.removeWatchCode(btn.dataset.watchDel)) {
+      renderWatchChips();
+      saveToDrive();
+    }
   });
 
   // 保有から売却（タップでコード・数量を流し込む）

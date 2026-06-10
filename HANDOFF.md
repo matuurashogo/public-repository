@@ -25,6 +25,8 @@
 - `tools/gen_prices.py` + `.github/workflows/update-prices.yml`: `latest_prices.json` を jquants-data から生成。Actions が毎日 07:30 JST に自動再生成・コミット（要 Secret `JQUANTS_DATA_TOKEN` = jquants-data 読取用 Fine-grained PAT）。
 - `index.html` / `css/style.css` / `manifest.webmanifest` / `sw.js` / `icons/`: UIとPWA一式。
 - `README.md` / `DEPLOY.md`: 利用・デプロイ手順。
+- **監視銘柄のアプリ内編集（TBK-0007）**: 買い時ボードカードの「監視銘柄を編集」から追加・削除。Drive マスターの `watchlist`（配列LWWマージ）に保存し、`tools/sync_universe_from_drive.py` が夜間に `indicators_universe.json` へ反映（削除も伝播。**GCP Secret 設定が完了するまで自動反映は保留** → `docs/tradebook-drive-sync-setup-todo.md`）。
+- **取引追加のフローティングボタン**: 「＋」を画面右下に固定（`.add-btn`）。スクロール不要でフォームを開ける。
 - `js/buylevels.js` + `tools/gen_buy_levels.py` + `data/buy_levels.json`: **買い時ボード**。監視リスト銘柄の「あといくら下がったら買いか」（レベル価格6本: 25日線/−5%/−8%・20日高値−10%/−15%・60日安値）を日次計算して表示（🟢到達/🟡接近/↗陽転）。データ契約は `docs/adr/TBK-0006-buy-levels-data-contract.md`、設計は `docs/plans/2026-06-10-buy-levels-board-design.md`。LINE 通知は private 側 `BuyLevels/notify.py`（テスト: `tests/buy_levels.test.js` / `tools/test_gen_buy_levels.py`）。
 
 ## 次にやること（このチャットの続き）

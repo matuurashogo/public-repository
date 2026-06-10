@@ -30,7 +30,24 @@ function emptyMaster() {
     deletedIds: {},
     entryTags: [...SEED_ENTRY_TAGS],
     exitTags: [...SEED_EXIT_TAGS],
+    watchlist: [], // 監視銘柄（買い時ボード対象・TBK-0007）。4桁コードの配列
+    watchlistUpdatedAt: 0, // 配列全体の最終編集時刻（LWWマージ用）
   };
+}
+
+// 監視銘柄コードの正規化（4桁コードのみ・重複除去・順序保持）。TBK-0007。
+const WATCH_CODE_RE = /^[0-9][0-9A-Z]{3}$/;
+function normalizeWatchlist(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    const code = String(raw).trim().toUpperCase().slice(0, 4);
+    if (!WATCH_CODE_RE.test(code) || seen.has(code)) continue;
+    seen.add(code);
+    out.push(code);
+  }
+  return out;
 }
 
 // 文字列配列を重複・空白除去しつつ順序を保って正規化する。
@@ -76,6 +93,8 @@ function normalizeMaster(master) {
     deletedIds: master.deletedIds && typeof master.deletedIds === "object" ? { ...master.deletedIds } : {},
     entryTags: normalizeTagList(master.entryTags, SEED_ENTRY_TAGS),
     exitTags: normalizeTagList(master.exitTags, SEED_EXIT_TAGS),
+    watchlist: normalizeWatchlist(master.watchlist),
+    watchlistUpdatedAt: typeof master.watchlistUpdatedAt === "number" ? master.watchlistUpdatedAt : 0,
   };
 }
 
@@ -127,7 +146,22 @@ export function mergeMasters(localMaster, remoteMaster) {
   const entryTags = unionTags(a.entryTags, b.entryTags);
   const exitTags = unionTags(a.exitTags, b.exitTags);
 
-  return { version: MASTER_VERSION, trades, deletedIds, entryTags, exitTags };
+  // 監視リストは配列全体の last-write-wins（削除を正しく伝播させるため。TBK-0007）。
+  // 同時刻（旧データ同士の 0 を含む）のみ和集合で救済する。
+  let watchlist;
+  let watchlistUpdatedAt;
+  if (a.watchlistUpdatedAt === b.watchlistUpdatedAt) {
+    watchlist = normalizeWatchlist(unionTags(a.watchlist, b.watchlist));
+    watchlistUpdatedAt = a.watchlistUpdatedAt;
+  } else if (a.watchlistUpdatedAt > b.watchlistUpdatedAt) {
+    watchlist = a.watchlist;
+    watchlistUpdatedAt = a.watchlistUpdatedAt;
+  } else {
+    watchlist = b.watchlist;
+    watchlistUpdatedAt = b.watchlistUpdatedAt;
+  }
+
+  return { version: MASTER_VERSION, trades, deletedIds, entryTags, exitTags, watchlist, watchlistUpdatedAt };
 }
 
 export class Store {
@@ -254,6 +288,36 @@ export class Store {
     }
     this._writeCache();
     return removed;
+  }
+
+  // ---- 監視リスト（買い時ボード対象・TBK-0007）----
+  getWatchlist() {
+    return this.master.watchlist || [];
+  }
+
+  // 配列全体を置き換える（初期シード用）。変更があれば watchlistUpdatedAt を進める。
+  setWatchlist(codes) {
+    const next = normalizeWatchlist(codes);
+    this.master.watchlist = next;
+    this.master.watchlistUpdatedAt = Date.now();
+    this._writeCache();
+    return next;
+  }
+
+  addWatchCode(code) {
+    const next = normalizeWatchlist([...(this.master.watchlist || []), code]);
+    if (next.length === (this.master.watchlist || []).length) return false; // 無効 or 重複
+    this.setWatchlist(next);
+    return true;
+  }
+
+  removeWatchCode(code) {
+    const target = String(code).trim().toUpperCase().slice(0, 4);
+    const cur = this.master.watchlist || [];
+    const next = cur.filter((c) => c !== target);
+    if (next.length === cur.length) return false;
+    this.setWatchlist(next);
+    return true;
   }
 
   // ---- localStorage キャッシュ（あくまで読み取り用。正はDrive）----

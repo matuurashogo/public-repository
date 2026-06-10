@@ -83,6 +83,21 @@ def extract_codes(master: dict) -> list[str]:
     return sorted(seen)
 
 
+def extract_watchlist(master: dict) -> list[str]:
+    """マスターの watchlist（アプリ内編集の監視銘柄・TBK-0007）を順序保持で返す。"""
+    raw = master.get("watchlist", []) if isinstance(master, dict) else []
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in raw:
+        c4 = str(c)[:4]
+        if _CODE_RE.fullmatch(c4) and c4 not in seen:
+            seen.add(c4)
+            out.append(c4)
+    return out
+
+
 def merge_universe(existing: dict, new_codes: list[str]) -> tuple[dict, list[str]]:
     """既存の universe dict に new_codes を追記マージする（既存順を保持し、新規を末尾に追加）。
 
@@ -94,6 +109,25 @@ def merge_universe(existing: dict, new_codes: list[str]) -> tuple[dict, list[str
     added = [c for c in new_codes if c not in have]
     out["codes"] = current + added
     return out, added
+
+
+def replace_universe(
+    existing: dict, watchlist: list[str], traded: list[str]
+) -> tuple[dict, list[str], list[str]]:
+    """universe の codes を「watchlist ∪ 売買銘柄」へ置き換える（TBK-0007 決定4）。
+
+    watchlist の順序を優先し、watchlist に無い売買銘柄を末尾に追加する。
+    アプリで監視リスト管理を始めたユーザーの「削除」を反映するための置き換え動作。
+    売買銘柄は entrySnap 生成（TBK-0003）に必要なため除外しない。
+    戻り値: (更新後 dict, 追加されたコード, 削除されたコード)。
+    """
+    out = dict(existing) if isinstance(existing, dict) else {}
+    current = [str(c)[:4] for c in out.get("codes", []) if _CODE_RE.fullmatch(str(c)[:4])]
+    target = list(watchlist) + [c for c in traded if c not in set(watchlist)]
+    added = [c for c in target if c not in set(current)]
+    removed = [c for c in current if c not in set(target)]
+    out["codes"] = target
+    return out, added, removed
 
 
 def main() -> int:
@@ -112,16 +146,35 @@ def main() -> int:
         print(f"::warning::Drive からの取引マスター取得に失敗しました（同期スキップ）: {e}", file=sys.stderr)
         return 0
 
-    codes = extract_codes(master)
-    if not codes:
+    traded = extract_codes(master)
+    watchlist = extract_watchlist(master)
+    existing = json.loads(UNIVERSE_FILE.read_text(encoding="utf-8"))
+
+    if watchlist:
+        # アプリ内編集の監視リストがある場合は置き換え（削除も反映。TBK-0007）
+        updated, added, removed = replace_universe(existing, watchlist, traded)
+        if not added and not removed:
+            print(f"監視リストは最新です（watchlist {len(watchlist)} 件・取引銘柄 {len(traded)} 件）。")
+            return 0
+        UNIVERSE_FILE.write_text(
+            json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        parts = []
+        if added:
+            parts.append(f"追加 {len(added)} 件: {', '.join(added)}")
+        if removed:
+            parts.append(f"削除 {len(removed)} 件: {', '.join(removed)}")
+        print(f"監視リストを watchlist 基準で更新しました（{' / '.join(parts)}）。")
+        return 0
+
+    # watchlist 未使用（空/欠損）の場合は従来どおり売買銘柄の追記のみ（後方互換）
+    if not traded:
         print("取引マスターに有効な銘柄コードがありませんでした。監視リストは変更しません。")
         return 0
 
-    existing = json.loads(UNIVERSE_FILE.read_text(encoding="utf-8"))
-    updated, added = merge_universe(existing, codes)
-
+    updated, added = merge_universe(existing, traded)
     if not added:
-        print(f"監視リストは最新です（取引銘柄 {len(codes)} 件はすべて登録済み）。")
+        print(f"監視リストは最新です（取引銘柄 {len(traded)} 件はすべて登録済み）。")
         return 0
 
     UNIVERSE_FILE.write_text(
