@@ -183,10 +183,13 @@ td.muted { color: #b0b0b5; }
 .kpi-empty { text-align: center; color: #b0b0b5; padding: 12px 0 2px; font-size: 13px; line-height: 1.6; }
 .kpi-empty.hidden { display: none; }
 
-/* 追加ボタン */
-.add-btn { display: block; width: calc(100% - 28px); margin: 14px 14px 0; padding: 15px;
-           background: var(--blue); color: #fff; border: 0; border-radius: 14px;
-           font-size: 16px; font-weight: 700; cursor: pointer; }
+/* 追加ボタン（画面右下固定のフローティングボタン。スクロール不要でフォームを開ける） */
+.add-btn { position: fixed; right: 18px; bottom: calc(18px + env(safe-area-inset-bottom));
+           width: 58px; height: 58px; border-radius: 50%;
+           background: var(--blue); color: #fff; border: 0;
+           font-size: 30px; font-weight: 700; line-height: 1; cursor: pointer;
+           box-shadow: 0 5px 16px rgba(0, 0, 0, .28); z-index: 40; }
+.add-btn:active { transform: scale(.94); }
 
 /* フォーム */
 .form-card form { display: flex; flex-direction: column; gap: 12px; }
@@ -355,3 +358,20 @@ td.muted { color: #b0b0b5; }
 .bl-hit .bl-dist { color: #1e8e4a; font-weight: 700; }
 .bl-near { background: #fdf3dc; border-radius: 8px; }
 .bl-near .bl-dist { color: #8a5a00; font-weight: 700; }
+
+/* 監視銘柄の編集（買い時ボード内・TBK-0007） */
+.bl-watch-toggle { display: block; width: 100%; margin-top: 10px; padding: 10px; font-size: 13px; }
+#bl-watch-editor { margin-top: 12px; }
+#bl-watch-chips { margin-bottom: 10px; }
+.bl-watch-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
+  font-weight: 600; color: #3a3a3e; background: #f4f4f6; border: 1px solid #e6e6ea;
+  border-radius: 999px; padding: 6px 8px 6px 12px; }
+.bl-watch-chip .bl-watch-chip-name { color: #8a8a8e; font-weight: 500; font-size: 11px;
+  max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bl-watch-chip button { border: 0; background: #e2e2e6; color: #6a6a6e; width: 18px; height: 18px;
+  border-radius: 50%; font-size: 12px; line-height: 1; cursor: pointer; }
+.bl-watch-add input { width: 100%; box-sizing: border-box; padding: 11px 12px; font-size: 15px;
+  border: 1px solid #d8d8dd; border-radius: 10px; }
+
+/* FAB と最下部コンテンツの重なり回避（取引履歴の末尾に余白を確保） */
+main, body { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }

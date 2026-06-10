@@ -81,6 +81,15 @@
       </table>
     </div>
     <p class="summary-note">監視リスト銘柄の買い目標価格（調整後終値ベース・翌朝の指値の目安）。🟢=到達 / 🟡=接近（あと3%以内）/ ↗=陽転（下げ止まり確認）。</p>
+    <button type="button" id="bl-watch-toggle" class="btn-ghost bl-watch-toggle">監視銘柄を編集</button>
+    <div id="bl-watch-editor" hidden>
+      <div id="bl-watch-chips" class="tag-chips"></div>
+      <div class="suggest-wrap bl-watch-add">
+        <input type="search" id="bl-watch-input" inputmode="text" autocomplete="off" placeholder="追加する銘柄（社名 / コード）" />
+        <ul id="bl-watch-suggest" class="suggest-list" hidden></ul>
+      </div>
+      <p id="bl-watch-note" class="summary-note">変更は Google Drive に保存され、夜間の自動同期後にボードへ反映されます。</p>
+    </div>
   </section>
 
   <!-- トレード成績（KPI） -->
@@ -134,7 +143,7 @@
   </section>
 
   <!-- 取引追加 -->
-  <button id="add-toggle" class="add-btn">＋ 取引を追加</button>
+  <button id="add-toggle" class="add-btn" aria-label="取引を追加" title="取引を追加">＋</button>
   <section class="card form-card" id="form-card" hidden>
     <div class="card-title" id="form-title">取引を追加</div>
     <form id="trade-form">
@@ -201,7 +210,7 @@
     <div class="card-title">取引履歴</div>
     <div id="trade-list"></div>
     <button type="button" id="list-more" class="btn-ghost list-more hidden"></button>
-    <p id="empty-note" class="empty-note">まだ取引がありません。「＋ 取引を追加」から記録を始めましょう。</p>
+    <p id="empty-note" class="empty-note">まだ取引がありません。右下の「＋」ボタンから記録を始めましょう。</p>
   </section>
 
   <!-- Chart.js（同梱・オフライン可） -->

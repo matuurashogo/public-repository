@@ -68,5 +68,30 @@ class TestMergeUniverse(unittest.TestCase):
         self.assertEqual(updated["codes"], ["7203"])
 
 
+class TestWatchlist(unittest.TestCase):
+    def test_extract_watchlist(self):
+        master = {"watchlist": ["7203", "72030", "abc", "7203", "6758"]}
+        # 5桁は4桁へ丸め（重複扱い）、不正コードは除外、順序保持
+        self.assertEqual(su.extract_watchlist(master), ["7203", "6758"])
+        self.assertEqual(su.extract_watchlist({}), [])
+        self.assertEqual(su.extract_watchlist({"watchlist": "x"}), [])
+
+    def test_replace_universe_applies_removal(self):
+        existing = {"_comment": "メモ", "codes": ["7203", "6758", "8306"]}
+        # watchlist から 8306 を外し 6101 を追加。6590 は売買銘柄（除外しない）
+        updated, added, removed = su.replace_universe(existing, ["7203", "6758", "6101"], ["6590"])
+        self.assertEqual(updated["codes"], ["7203", "6758", "6101", "6590"])
+        self.assertEqual(added, ["6101", "6590"])
+        self.assertEqual(removed, ["8306"])
+        self.assertEqual(updated["_comment"], "メモ")  # 他キーは保持
+
+    def test_replace_universe_no_change(self):
+        existing = {"codes": ["7203", "6590"]}
+        updated, added, removed = su.replace_universe(existing, ["7203"], ["6590"])
+        self.assertEqual(updated["codes"], ["7203", "6590"])
+        self.assertEqual(added, [])
+        self.assertEqual(removed, [])
+
+
 if __name__ == "__main__":
     unittest.main()

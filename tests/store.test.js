@@ -191,3 +191,43 @@ test("setEntryOutcome: 凍結を保存し updatedAt を更新する", () => {
   assert.ok(s.getMaster().trades[0].updatedAt >= before);
   assert.equal(s.setEntryOutcome("無いid", OUTCOME), false);
 });
+
+// ---- 監視リスト（watchlist・TBK-0007）----
+
+test("watchlist: 正規化（不正コード・重複の除去、順序保持、欠損は空配列）", () => {
+  const m = mergeMasters(
+    { version: 3, trades: [], deletedIds: {}, watchlist: ["7203", "72030", "abc", "7203", "6758"], watchlistUpdatedAt: 0 },
+    { version: 3, trades: [], deletedIds: {} }
+  );
+  // "72030" は先頭4桁に丸め（7203 と重複）、"abc" は不正で除外
+  assert.deepEqual(m.watchlist, ["7203", "6758"]);
+});
+
+test("watchlist: 配列全体の last-write-wins（削除が新しい側で伝播する）", () => {
+  const older = { version: 3, trades: [], deletedIds: {}, watchlist: ["7203", "6758", "6855"], watchlistUpdatedAt: 100 };
+  const newer = { version: 3, trades: [], deletedIds: {}, watchlist: ["7203"], watchlistUpdatedAt: 200 };
+  // 6758/6855 を削除した newer が勝つ（和集合だと削除が復活してしまう）
+  assert.deepEqual(mergeMasters(older, newer).watchlist, ["7203"]);
+  assert.deepEqual(mergeMasters(newer, older).watchlist, ["7203"]);
+  assert.equal(mergeMasters(older, newer).watchlistUpdatedAt, 200);
+});
+
+test("watchlist: 同時刻（旧データ同士の0を含む）は和集合で救済する", () => {
+  const a = { version: 3, trades: [], deletedIds: {}, watchlist: ["7203"], watchlistUpdatedAt: 0 };
+  const b = { version: 3, trades: [], deletedIds: {}, watchlist: ["6758"], watchlistUpdatedAt: 0 };
+  assert.deepEqual(mergeMasters(a, b).watchlist, ["7203", "6758"]);
+});
+
+test("Store: addWatchCode / removeWatchCode が watchlistUpdatedAt を進める", () => {
+  const s = new Store();
+  assert.equal(s.addWatchCode("7203"), true);
+  assert.equal(s.addWatchCode("7203"), false); // 重複
+  assert.equal(s.addWatchCode("xx"), false); // 不正
+  assert.deepEqual(s.getWatchlist(), ["7203"]);
+  const ts1 = s.getMaster().watchlistUpdatedAt;
+  assert.ok(ts1 > 0);
+  assert.equal(s.removeWatchCode("7203"), true);
+  assert.equal(s.removeWatchCode("7203"), false); // もう無い
+  assert.deepEqual(s.getWatchlist(), []);
+  assert.ok(s.getMaster().watchlistUpdatedAt >= ts1);
+});
