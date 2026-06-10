@@ -16,6 +16,7 @@ import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagB
 import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus, latestIndicatorDate, isEntryDataReady, getRows, computeEntryOutcome } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
+import { loadBuyLevels, renderBuyLevels } from "./buylevels.js";
 
 const store = new Store();
 let axis = "month"; // year | month | code
@@ -1605,6 +1606,8 @@ async function init() {
   renderTagChips();
   renderAll();
   refreshIndicators(); // 客観スナップショットは取得でき次第あとから反映
+  // 買い時ボード（TBK-0006）。取得でき次第あとから表示（失敗時はカード非表示のまま）
+  loadBuyLevels().then((payload) => renderBuyLevels(payload, codeToName));
 
   if (!isConfigured()) {
     $("signin-note").textContent =
