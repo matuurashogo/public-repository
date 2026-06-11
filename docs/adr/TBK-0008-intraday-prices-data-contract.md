@@ -34,10 +34,10 @@
    - `source` = 取得ソース識別子（差し替え時に変わる）
    - `prices` = 4桁コード → 最新価格（小数1桁・約20分遅延）。取得失敗銘柄はキーを出さない
 3. **置き場所は orphan ブランチ `intraday`**（force-push・履歴は常に1コミット）。
-   30分ごとの更新を main にコミットすると履歴が年数千件汚れるため。読み手は
+   15分ごとの更新を main にコミットすると履歴が年数千件汚れるため。読み手は
    `https://raw.githubusercontent.com/<owner>/<repo>/intraday/data/intraday_prices.json`
    を fetch する（CORS 可・CDN キャッシュ約5分）。
-4. **更新スケジュール**: 平日 9:00〜15:30 JST の30分ごと（`intraday-prices.yml`）。
+4. **更新スケジュール**: 平日 9:00〜15:30 JST の15分ごと（`intraday-prices.yml`）。
    対象は監視リスト（`data/indicators_universe.json`）の銘柄のみ。分足等の履歴は蓄積しない。
 5. **読み手の劣化動作（必須）**: ファイルが取得できない・`asOf` が古い（90分超）場合は
    従来どおり日足終値の表示へ静かにフォールバックする。エラー表示にしない。

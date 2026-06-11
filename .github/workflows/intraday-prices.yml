@@ -6,8 +6,8 @@ name: Update intraday prices
 
 on:
   schedule:
-    # 平日 9:00〜15:30 JST（= UTC 0:00〜6:30）の30分ごと。cron は数分遅延しうるが asOf 表示で吸収する
-    - cron: "*/30 0-6 * * 1-5"
+    # 平日 9:00〜15:30 JST（= UTC 0:00〜6:30）の15分ごと。cron は数分遅延しうるが asOf 表示で吸収する
+    - cron: "*/15 0-6 * * 1-5"
   workflow_dispatch: {}
 
 permissions:

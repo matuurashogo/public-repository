@@ -1,6 +1,6 @@
 // 場中価格（intraday_prices.json・TBK-0008）の取得と鮮度判定。
 // 表示専用: 含み損益と現在値の表示にだけ使い、判定（買いレベルの hit 等）には使わない。
-// データの正は orphan ブランチ `intraday`（GitHub Actions が場中30分ごとに更新）。
+// データの正は orphan ブランチ `intraday`（GitHub Actions が場中15分ごとに更新）。
 
 const INTRADAY_URL =
   "https://raw.githubusercontent.com/matuurashogo/public-repository/intraday/data/intraday_prices.json";
