@@ -375,3 +375,7 @@ td.muted { color: #b0b0b5; }
 
 /* FAB と最下部コンテンツの重なり回避（取引履歴の末尾に余白を確保） */
 main, body { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
+
+/* 場中価格の表示マーク（TBK-0008・表示専用） */
+.bl-live { font-size: 9px; color: #0a64d6; background: #e9f0ff; border-radius: 4px;
+  padding: 1px 4px; margin-left: 4px; vertical-align: middle; font-weight: 700; }
