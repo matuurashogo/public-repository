@@ -1,0 +1,45 @@
+name: Update intraday prices
+
+# 場中価格（約20分遅延・表示専用・TBK-0008）を監視リスト銘柄ぶん取得し、
+# orphan ブランチ `intraday` へ force-push する（main の履歴を汚さない）。
+# 判定・通知は終値ベースのまま（update-prices.yml）。こちらは表示用の補助データのみ。
+
+on:
+  schedule:
+    # 平日 9:00〜15:30 JST（= UTC 0:00〜6:30）の15分ごと。cron は数分遅延しうるが asOf 表示で吸収する
+    - cron: "*/15 0-6 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: intraday-prices
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout public repo
+        uses: actions/checkout@v4
+
+      - name: Fetch intraday prices (Yahoo chart API・標準ライブラリのみ)
+        run: python3 tools/fetch_intraday_prices.py
+
+      - name: Push to intraday branch (orphan・履歴は常に1コミット)
+        run: |
+          set -euo pipefail
+          if [ ! -f data/intraday_prices.json ]; then
+            echo "取得結果なし（休場・ソース停止など）。intraday ブランチは更新しません。"
+            exit 0
+          fi
+          mkdir -p /tmp/intraday/data
+          cp data/intraday_prices.json /tmp/intraday/data/
+          cd /tmp/intraday
+          git init -q -b intraday
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -q -m "場中価格を更新（表示専用・TBK-0008）"
+          git push --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" intraday

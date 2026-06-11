@@ -17,6 +17,7 @@ import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus, latestIndic
 import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 import { loadBuyLevels, renderBuyLevels, getBuyLevels } from "./buylevels.js";
+import { loadIntradayPrices, freshIntraday } from "./intraday.js";
 
 const store = new Store();
 let axis = "month"; // year | month | code
@@ -377,8 +378,11 @@ function addTagPrompt(kind) {
 // 保有銘柄カード: 銘柄 / 保有数 / 平均取得単価 / 現在値 / 評価額 / 含み損益（評価額の大きい順）。
 // holdings は calcRealized が返す { code: { quantity, cost } }。
 // 最新終値（latest_prices.json）があれば含み損益（未実現）を併記し、合計と基準日も表示する。
+// 場中は intraday_prices.json（約20分遅延・表示専用・TBK-0008）が新鮮なら現在値を上書きする。
 function renderHoldings(holdings) {
-  const { rows, total } = calcUnrealized(holdings, getPriceMap());
+  const intraday = freshIntraday();
+  const priceMap = intraday ? { ...getPriceMap(), ...intraday.prices } : getPriceMap();
+  const { rows, total } = calcUnrealized(holdings, priceMap);
 
   const thead = $("holdings-table").querySelector("thead");
   const tbody = $("holdings-table").querySelector("tbody");
@@ -437,8 +441,9 @@ function renderHoldings(holdings) {
         ? ""
         : ` ／ ${total.unpricedCount}銘柄は株価未取得`;
       const shortDate = esc(date).replace(/^\d{4}-/, "").replace("-", "/"); // 2026-06-01 → 06/01
+      const basis = intraday ? `${esc(intraday.label)}時点（場中・約20分遅延）` : `${shortDate}終値`;
       note.innerHTML =
-        `${shortDate}終値 ／ 含み損益 <span class="${cls}">${formatYen(total.unrealized)}</span>円${totalRate}${esc(excluded)}`;
+        `${basis} ／ 含み損益 <span class="${cls}">${formatYen(total.unrealized)}</span>円${totalRate}${esc(excluded)}`;
     }
   }
 }
@@ -1665,9 +1670,11 @@ async function refreshPricesOnForeground() {
   _lastPriceRefresh = now;
   try {
     const before = getPriceDate();
-    await loadPrices(); // ネットワーク優先（SW設定）。失敗時は前回値のまま。
-    // 価格は renderHoldings 内で getPriceMap() を都度参照するため、再描画で反映される
+    // 終値と場中価格（TBK-0008）を取り直す。失敗時は前回値のまま。
+    await Promise.all([loadPrices(), loadIntradayPrices()]);
+    // 価格は renderHoldings 内で都度参照するため、再描画で反映される
     renderAll();
+    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday());
     if (before !== getPriceDate()) {
       console.info("最新株価を取得しました:", getPriceDate());
     }
@@ -1684,8 +1691,11 @@ async function init() {
   renderTagChips();
   renderAll();
   refreshIndicators(); // 客観スナップショットは取得でき次第あとから反映
-  // 買い時ボード（TBK-0006）。取得でき次第あとから表示（失敗時はカード非表示のまま）
-  loadBuyLevels().then((payload) => renderBuyLevels(payload, codeToName));
+  // 買い時ボード（TBK-0006）と場中価格（TBK-0008）。取得でき次第あとから反映
+  Promise.all([loadBuyLevels(), loadIntradayPrices()]).then(() => {
+    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday());
+    renderAll(); // 場中価格を保有銘柄の含み損益にも反映
+  });
 
   if (!isConfigured()) {
     $("signin-note").textContent =

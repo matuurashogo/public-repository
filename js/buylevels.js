@@ -60,7 +60,9 @@ export function buildBoard(payload) {
 }
 
 // ボードを #buylevels-table へ描画する。データが無ければカードを隠したまま何もしない。
-export function renderBuyLevels(payload, codeToName) {
+// intraday（{prices, label} | null・TBK-0008）が渡されたら現在値の「表示だけ」場中価格に
+// 差し替える。🟢/🟡（hit/near）の判定は終値ベースのまま変えない。
+export function renderBuyLevels(payload, codeToName, intraday = null) {
   const card = document.getElementById("buylevels-card");
   const table = document.getElementById("buylevels-table");
   const dateEl = document.getElementById("buylevels-date");
@@ -72,7 +74,10 @@ export function renderBuyLevels(payload, codeToName) {
     return;
   }
 
-  if (dateEl) dateEl.textContent = board.updated ? `基準日 ${board.updated}` : "";
+  if (dateEl) {
+    const base = board.updated ? `基準日 ${board.updated}` : "";
+    dateEl.textContent = intraday ? `${base} ／ 現在値 ${intraday.label}時点` : base;
+  }
 
   // ヘッダー: 全銘柄のレベル ID/ラベルの和集合（通常は L1..L6 で共通）
   const levelDefs = [];
@@ -112,10 +117,15 @@ export function renderBuyLevels(payload, codeToName) {
         );
       })
       .join("");
+    // 現在値の表示だけ場中価格に差し替える（hit/near の判定は終値ベースのまま）
+    const livePrice = intraday && intraday.prices ? Number(intraday.prices[r.code]) : NaN;
+    const closeText = Number.isFinite(livePrice)
+      ? `${livePrice.toLocaleString()}<span class="bl-live">場中</span>`
+      : Number(r.close).toLocaleString();
     const tr = document.createElement("tr");
     tr.innerHTML =
       `<td class="bl-name">${r.code}<span class="bl-stock-name">${name}</span></td>` +
-      `<td class="bl-close">${Number(r.close).toLocaleString()}${r.rebound ? '<span class="bl-rebound" title="陽転（下げ止まり）">↗</span>' : ""}</td>` +
+      `<td class="bl-close">${closeText}${r.rebound ? '<span class="bl-rebound" title="陽転（下げ止まり）">↗</span>' : ""}</td>` +
       tds;
     tbody.appendChild(tr);
   }
