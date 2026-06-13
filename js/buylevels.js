@@ -36,6 +36,21 @@ export function fmtDist(level) {
   return `あと${(-level.dist * 100).toFixed(1)}%`;
 }
 
+// 連れ安度バッジ（TBK-0009）。急落イベント銘柄のみ tsureyasu を持つ。
+// 連れ安=🟢（買える押し目）/ 個別急落=🔴（深くても見送り）。無ければ null。
+export function tsureyasuBadge(tsureyasu) {
+  if (!tsureyasu || !tsureyasu.event || !tsureyasu.tag) return null;
+  const good = tsureyasu.tag === "連れ安";
+  const r5 = typeof tsureyasu.self_r5 === "number" ? `${(tsureyasu.self_r5 * 100).toFixed(1)}%` : "";
+  const resid =
+    typeof tsureyasu.resid === "number" ? `業種差${(tsureyasu.resid * 100).toFixed(1)}pt` : "";
+  return {
+    text: good ? "🟢連れ安" : "🔴個別急落",
+    cls: good ? "bl-tsure-good" : "bl-tsure-bad",
+    title: `5日${r5}・${resid}（${good ? "業種なみの連れ安＝買える押し目" : "業種より大きく下落＝見送り"}）`,
+  };
+}
+
 // 表示用の行データを組み立てる純粋関数（テスト対象）。
 // 並び順: 到達レベル数が多い銘柄 → 最も近いレベルが近い銘柄 の順（行動が必要な順）。
 export function buildBoard(payload) {
@@ -53,7 +68,15 @@ export function buildBoard(payload) {
     // 未到達レベルのうち最も近い距離（全到達なら 0）
     const dists = (s.levels || []).filter((lv) => !lv.hit).map((lv) => -lv.dist);
     const nearest = dists.length ? Math.min(...dists) : 0;
-    return { code: s.code, close: s.close, rebound: !!s.rebound, hitCount, nearest, cells };
+    return {
+      code: s.code,
+      close: s.close,
+      rebound: !!s.rebound,
+      tsureyasu: s.tsureyasu || null,
+      hitCount,
+      nearest,
+      cells,
+    };
   });
   rows.sort((a, b) => b.hitCount - a.hitCount || a.nearest - b.nearest);
   return { updated: payload.updated || "", rows };
@@ -122,9 +145,13 @@ export function renderBuyLevels(payload, codeToName, intraday = null) {
     const closeText = Number.isFinite(livePrice)
       ? `${livePrice.toLocaleString()}<span class="bl-live">場中</span>`
       : Number(r.close).toLocaleString();
+    const badge = tsureyasuBadge(r.tsureyasu);
+    const badgeHtml = badge
+      ? `<span class="bl-tsure ${badge.cls}" title="${badge.title}">${badge.text}</span>`
+      : "";
     const tr = document.createElement("tr");
     tr.innerHTML =
-      `<td class="bl-name">${r.code}<span class="bl-stock-name">${name}</span></td>` +
+      `<td class="bl-name">${r.code}<span class="bl-stock-name">${name}</span>${badgeHtml}</td>` +
       `<td class="bl-close">${closeText}${r.rebound ? '<span class="bl-rebound" title="陽転（下げ止まり）">↗</span>' : ""}</td>` +
       tds;
     tbody.appendChild(tr);

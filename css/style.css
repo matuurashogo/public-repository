@@ -359,6 +359,12 @@ td.muted { color: #b0b0b5; }
 .bl-near { background: #fdf3dc; border-radius: 8px; }
 .bl-near .bl-dist { color: #8a5a00; font-weight: 700; }
 
+/* 連れ安度バッジ（TBK-0009）: 急落イベント銘柄のみ。連れ安=買える押し目 / 個別急落=見送り。 */
+.bl-tsure { display: inline-block; margin-left: 4px; font-size: 9.5px; font-weight: 700;
+  padding: 1px 5px; border-radius: 6px; white-space: nowrap; vertical-align: middle; }
+.bl-tsure-good { background: #e6f7ec; color: #1e8e4a; }
+.bl-tsure-bad { background: #fdecec; color: #c0392b; }
+
 /* 監視銘柄の編集（買い時ボード内・TBK-0007） */
 .bl-watch-toggle { display: block; width: 100%; margin-top: 10px; padding: 10px; font-size: 13px; }
 #bl-watch-editor { margin-top: 12px; }
