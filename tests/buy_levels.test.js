@@ -2,7 +2,7 @@
 //   実行: node --test tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { levelState, fmtDist, buildBoard } from "../js/buylevels.js";
+import { levelState, fmtDist, buildBoard, tsureyasuBadge } from "../js/buylevels.js";
 
 const payload = {
   updated: "2026-06-10",
@@ -63,4 +63,47 @@ test("buildBoard: 到達数が多い銘柄 → 近い銘柄の順に並ぶ", () 
 test("buildBoard: 不正payloadは null を返す（カード非表示の劣化動作）", () => {
   assert.equal(buildBoard(null), null);
   assert.equal(buildBoard({}), null);
+});
+
+test("tsureyasuBadge: 連れ安=🟢 / 個別急落=🔴 / 無しは null（TBK-0009）", () => {
+  const good = tsureyasuBadge({ event: true, tag: "連れ安", self_r5: -0.16, resid: -0.01 });
+  assert.equal(good.text, "🟢連れ安");
+  assert.equal(good.cls, "bl-tsure-good");
+  assert.ok(good.title.includes("-16.0%"));
+
+  const bad = tsureyasuBadge({ event: true, tag: "個別急落", self_r5: -0.3, resid: -0.15 });
+  assert.equal(bad.text, "🔴個別急落");
+  assert.equal(bad.cls, "bl-tsure-bad");
+
+  // 急落イベントでない / タグ無し / null は表示しない
+  assert.equal(tsureyasuBadge(null), null);
+  assert.equal(tsureyasuBadge({ event: false, tag: "連れ安" }), null);
+  assert.equal(tsureyasuBadge({ event: true }), null);
+});
+
+test("buildBoard: tsureyasu を行に引き継ぐ（無い銘柄は null）", () => {
+  const p = {
+    updated: "2026-06-13",
+    near_threshold: 0.03,
+    stocks: [
+      {
+        code: "6855",
+        close: 5800.0,
+        rebound: false,
+        tsureyasu: { event: true, tag: "個別急落", self_r5: -0.2, sector: "3650", resid: -0.08 },
+        levels: [{ id: "L3", label: "25日線-8%", price: 5900.0, dist: 0.0172, hit: true }],
+      },
+      {
+        code: "7203",
+        close: 3000.0,
+        rebound: true,
+        levels: [{ id: "L3", label: "25日線-8%", price: 2900.0, dist: -0.0333, hit: false }],
+      },
+    ],
+  };
+  const board = buildBoard(p);
+  const r6855 = board.rows.find((r) => r.code === "6855");
+  const r7203 = board.rows.find((r) => r.code === "7203");
+  assert.equal(r6855.tsureyasu.tag, "個別急落");
+  assert.equal(r7203.tsureyasu, null);
 });

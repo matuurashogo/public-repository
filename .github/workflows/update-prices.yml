@@ -49,7 +49,9 @@ jobs:
             "https://x-access-token:${GH_TOKEN}@github.com/matuurashogo/jquants-data.git" jq
           cd jq
           git sparse-checkout init --cone
-          git sparse-checkout set prices
+          # prices/（日次株価）に加え full/（33業種マスター）も取得する。
+          # full/ は買い時ボードの連れ安度（TBK-0009・H84）の業種マップに使う。
+          git sparse-checkout set prices full
           git checkout
           test -f prices/prices_latest.parquet
 
