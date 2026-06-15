@@ -143,7 +143,7 @@ export function renderBuyLevels(payload, codeToName, intraday = null) {
     // 現在値の表示だけ場中価格に差し替える（hit/near の判定は終値ベースのまま）
     const livePrice = intraday && intraday.prices ? Number(intraday.prices[r.code]) : NaN;
     const closeText = Number.isFinite(livePrice)
-      ? `${livePrice.toLocaleString()}<span class="bl-live">場中</span>`
+      ? livePrice.toLocaleString()
       : Number(r.close).toLocaleString();
     const badge = tsureyasuBadge(r.tsureyasu);
     const badgeHtml = badge
