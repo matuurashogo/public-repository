@@ -3,11 +3,19 @@ name: Update intraday prices
 # 場中価格（約20分遅延・表示専用・TBK-0008）を監視リスト銘柄ぶん取得し、
 # orphan ブランチ `intraday` へ force-push する（main の履歴を汚さない）。
 # 判定・通知は終値ベースのまま（update-prices.yml）。こちらは表示用の補助データのみ。
+#
+# GitHub の高頻度 cron（`*/15`）は間引き・遅延が多く、実運用では1日2回程度しか発火せず
+# 場中更新が止まっていた（2026-06 調査）。そこで「cron は1日2回の起動のみに使い、
+# 取得ループはジョブ内で15分ごとに回す」方式へ変更した。ジョブ内ループは GitHub の
+# スケジューラに依存しないため確実に回る。東証は 11:30〜12:30 が昼休みのため、
+# ジョブ上限（6h）と無駄打ち回避を兼ねて前場・後場の2セッションに分ける。
 
 on:
   schedule:
-    # 平日 9:00〜15:30 JST（= UTC 0:00〜6:30）の15分ごと。cron は数分遅延しうるが asOf 表示で吸収する
-    - cron: "*/15 0-6 * * 1-5"
+    # 9:00 JST = 0:00 UTC 起動 → 前場（〜11:30 JST = 2:30 UTC）を15分ごとに回す
+    - cron: "0 0 * * 1-5"
+    # 12:30 JST = 3:30 UTC 起動 → 後場（〜15:30 JST = 6:30 UTC）を15分ごとに回す
+    - cron: "30 3 * * 1-5"
   workflow_dispatch: {}
 
 permissions:
@@ -15,31 +23,68 @@ permissions:
 
 concurrency:
   group: intraday-prices
+  # 古いセッションのループが残っていたら新しい起動で打ち切って回し直す
   cancel-in-progress: true
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    # 1セッション最大約3時間（後場）。GitHub ジョブ上限(6h)内に収める安全弁。
+    timeout-minutes: 210
     steps:
       - name: Checkout public repo
         uses: actions/checkout@v4
 
-      - name: Fetch intraday prices (Yahoo chart API・標準ライブラリのみ)
-        run: python3 tools/fetch_intraday_prices.py
-
-      - name: Push to intraday branch (orphan・履歴は常に1コミット)
+      - name: Fetch & push every 15min until session end (Yahoo chart API・標準ライブラリのみ)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          if [ ! -f data/intraday_prices.json ]; then
-            echo "取得結果なし（休場・ソース停止など）。intraday ブランチは更新しません。"
-            exit 0
+          # -e は付けない: 1回の取得・push 失敗でセッション全体を止めず、次の回で再試行する。
+          set -uo pipefail
+
+          # 現在UTCから当該セッションの終了エポックを決める。
+          #   前場終了 02:30 UTC(11:30 JST) / 後場終了 06:30 UTC(15:30 JST)
+          # cron 起動が多少遅延しても、終了時刻は絶対時刻なので場外まで回り続けない。
+          now=$(date -u +%s)
+          today=$(date -u +%Y-%m-%d)
+          morning_end=$(date -u -d "${today}T02:30:00Z" +%s)
+          afternoon_end=$(date -u -d "${today}T06:30:00Z" +%s)
+          if [ "$now" -lt "$morning_end" ]; then
+            END=$morning_end
+          elif [ "$now" -lt "$afternoon_end" ]; then
+            END=$afternoon_end
+          else
+            END=$now  # 場外の手動実行など → 1回だけ取得して終了
           fi
-          mkdir -p /tmp/intraday/data
-          cp data/intraday_prices.json /tmp/intraday/data/
-          cd /tmp/intraday
-          git init -q -b intraday
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
-          git commit -q -m "場中価格を更新（表示専用・TBK-0008）"
-          git push --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" intraday
+
+          # data/intraday_prices.json を orphan ブランチ intraday へ force-push する。
+          # 取得結果が無い回は push しない（読み手は古い asOf を検知して終値へフォールバック）。
+          push_intraday() {
+            if [ ! -f data/intraday_prices.json ]; then
+              echo "取得結果なし（休場・ソース停止など）。今回は intraday ブランチを更新しません。"
+              return 0
+            fi
+            rm -rf /tmp/intraday
+            mkdir -p /tmp/intraday/data
+            cp data/intraday_prices.json /tmp/intraday/data/
+            ( cd /tmp/intraday \
+              && git init -q -b intraday \
+              && git config user.name "github-actions[bot]" \
+              && git config user.email "41898282+github-actions[bot]@users.noreply.github.com" \
+              && git add . \
+              && git commit -q -m "場中価格を更新（表示専用・TBK-0008）" \
+              && git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" intraday )
+          }
+
+          while :; do
+            python3 tools/fetch_intraday_prices.py \
+              || echo "::warning::取得スクリプトが非ゼロ終了。次の回で再試行します。"
+            push_intraday || echo "::warning::intraday ブランチへの push に失敗。次の回で再試行します。"
+            now=$(date -u +%s)
+            if [ "$now" -ge "$END" ]; then
+              echo "セッション終了時刻に到達。ループを終了します。"
+              break
+            fi
+            echo "15分待機して再取得します（終了まで残り約 $(( (END - now) / 60 )) 分）。"
+            sleep 900
+          done

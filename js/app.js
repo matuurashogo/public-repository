@@ -1660,6 +1660,27 @@ function wireEvents() {
     if (document.visibilityState === "visible") refreshPricesOnForeground();
   });
   window.addEventListener("focus", refreshPricesOnForeground); // PC/一部ブラウザ向けの保険
+
+  // 場中はボードを開きっぱなしでも自動更新したいので、表示中だけ数分ごとに
+  // 場中価格（TBK-0008・表示専用）を取り直して現在値表示を更新する。
+  setInterval(pollIntraday, INTRADAY_POLL_MS);
+}
+
+// 場中価格の定期ポーリング間隔（表示専用・TBK-0008）。
+const INTRADAY_POLL_MS = 5 * 60_000;
+
+// 表示中のみ場中価格を取り直し、買い時ボードと保有カードの「現在値表示」を更新する。
+// タブが裏のときは何もしない（無駄な fetch を避ける）。古い・取得失敗のときは
+// freshIntraday() が null を返し、従来どおり終値表示へ静かにフォールバックする。
+async function pollIntraday() {
+  if (document.visibilityState !== "visible") return;
+  try {
+    await loadIntradayPrices();
+    renderAll();
+    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday());
+  } catch (e) {
+    console.warn("場中価格の定期更新に失敗:", e);
+  }
 }
 
 // 前面復帰時の株価リフレッシュ。短時間の連続復帰での無駄な再取得を防ぐためスロットルする。
