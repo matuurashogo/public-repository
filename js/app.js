@@ -441,7 +441,7 @@ function renderHoldings(holdings) {
         ? ""
         : ` ／ ${total.unpricedCount}銘柄は株価未取得`;
       const shortDate = esc(date).replace(/^\d{4}-/, "").replace("-", "/"); // 2026-06-01 → 06/01
-      const basis = intraday ? `${esc(intraday.label)}時点（場中・約20分遅延）` : `${shortDate}終値`;
+      const basis = intraday ? `${esc(intraday.label)}時点` : `${shortDate}終値`;
       note.innerHTML =
         `${basis} ／ 含み損益 <span class="${cls}">${formatYen(total.unrealized)}</span>円${totalRate}${esc(excluded)}`;
     }
