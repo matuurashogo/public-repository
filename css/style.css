@@ -162,6 +162,17 @@ tr:last-child td { border-bottom: 0; }
 td.muted { color: #b0b0b5; }
 .rate { color: #8a8a8e; font-size: 11px; font-variant-numeric: tabular-nums; }
 
+/* 保有カード: 銘柄は左寄せ2段（名前1行省略＋下に小さくコード）、取得→現在/利確目標は2段表示 */
+#holdings-table th:first-child, #holdings-table td.h-name { text-align: left; }
+.h-stock { display: block; font-weight: 600; max-width: 9em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-code { display: block; color: #b0b0b5; font-size: 11px; }
+.h-px { white-space: nowrap; }
+.h-arrow { color: #c8c8cd; margin: 0 3px; }
+.h-tp { white-space: nowrap; line-height: 1.25; }
+.h-tp-dist, .h-tp-hit { display: block; font-weight: 600; }
+.h-tp-target { display: block; color: #8a8a8e; font-size: 11px; }
+
 /* グラフ */
 .chart-wrap { position: relative; height: 180px; }
 .hist-wrap { height: 150px; }
