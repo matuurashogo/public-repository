@@ -17,7 +17,7 @@ test("paramsFromPayload: JSONの値を採用し、欠損時は既定にフォー
     floor: 0.04,
     cap: 0.2,
   });
-  assert.deepEqual(paramsFromPayload(null), { k: 2.5, floor: 0.05, cap: 0.15 });
+  assert.deepEqual(paramsFromPayload(null), { k: 2.0, floor: 0.05, cap: 0.15 });
 });
 
 test("clamp は下限・上限で頭打ちにする", () => {

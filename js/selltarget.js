@@ -27,7 +27,7 @@ export function getVolatility() {
 export function paramsFromPayload(payload) {
   const p = payload || {};
   return {
-    k: Number.isFinite(p.k) ? p.k : 2.5,
+    k: Number.isFinite(p.k) ? p.k : 2.0,
     floor: Number.isFinite(p.floor) ? p.floor : 0.05,
     cap: Number.isFinite(p.cap) ? p.cap : 0.15,
   };
