@@ -18,6 +18,7 @@ import { MATSUI_BOX_RATE } from "./config.js";
 import { renderCumulative, renderHistogram } from "./charts.js";
 import { loadBuyLevels, renderBuyLevels, getBuyLevels } from "./buylevels.js";
 import { loadIntradayPrices, freshIntraday } from "./intraday.js";
+import { loadVolatility, getVolatility, paramsFromPayload, computeSellTarget } from "./selltarget.js";
 
 const store = new Store();
 let axis = "month"; // year | month | code
@@ -378,6 +379,20 @@ function addTagPrompt(kind) {
 // 保有銘柄カード: 銘柄 / 保有数 / 平均取得単価 / 現在値 / 評価額 / 含み損益（評価額の大きい順）。
 // holdings は calcRealized が返す { code: { quantity, cost } }。
 // 最新終値（latest_prices.json）があれば含み損益（未実現）を併記し、合計と基準日も表示する。
+// 利確目標セル（ボラ連動・TBK-0010・表示専用）。σ20が無ければ「—」。
+// 到達なら緑で「🎯到達」、未到達は「あと +X%」。title に「目標 +W%（σ連動）」を出す。
+function sellTargetCell(avgCost, currentPrice, sigma, params, yen) {
+  const t = computeSellTarget(avgCost, currentPrice, sigma, params);
+  if (!t) return `<td class="muted">—</td>`;
+  let state = "";
+  if (t.dist !== null) {
+    state = t.hit
+      ? ` <span class="${gainLossClass(1)}">🎯到達</span>`
+      : ` <span class="rate">あと ${formatPct(t.dist)}</span>`;
+  }
+  return `<td title="${esc(`目標 ${formatPct(t.width)}（σ連動）`)}">${yen(t.targetPrice)}${state}</td>`;
+}
+
 // 場中は intraday_prices.json（約20分遅延・表示専用・TBK-0008）が新鮮なら現在値を上書きする。
 function renderHoldings(holdings) {
   const intraday = freshIntraday();
@@ -391,12 +406,20 @@ function renderHoldings(holdings) {
 
   // 基準日の注記（価格未取得なら従来の3列にフォールバック）
   const hasPrices = date && rows.some((r) => r.priced);
+
+  // 利確目標（ボラ連動・TBK-0010）。σ20 配信がある時だけ列を出す（無ければ従来表示のまま）。
+  const vol = getVolatility();
+  const tpParams = paramsFromPayload(vol);
+  const sigmaMap = (vol && vol.sigma) || {};
+  const hasTp = hasPrices && Object.keys(sigmaMap).length > 0;
+  const tpHead = hasTp ? "<th>利確目標</th>" : "";
+
   thead.innerHTML = hasPrices
-    ? `<tr><th>銘柄</th><th>保有数</th><th>平均取得単価</th><th>現在値</th><th>評価額</th><th>含み損益</th></tr>`
+    ? `<tr><th>銘柄</th><th>保有数</th><th>平均取得単価</th><th>現在値</th><th>評価額</th><th>含み損益</th>${tpHead}</tr>`
     : `<tr><th>銘柄</th><th>保有数</th><th>平均取得単価</th></tr>`;
 
   if (rows.length === 0) {
-    const cols = hasPrices ? 6 : 3;
+    const cols = hasPrices ? (hasTp ? 7 : 6) : 3;
     tbody.innerHTML = `<tr><td colspan="${cols}" class="table-empty">保有中の銘柄はありません</td></tr>`;
     if (note) note.textContent = "";
     return;
@@ -412,11 +435,15 @@ function renderHoldings(holdings) {
       if (!hasPrices) {
         return `<tr><td>${name} ${codeTag}</td><td>${qty}</td><td>${avg}</td></tr>`;
       }
+      // 利確目標（TBK-0010）。取得単価とσ20から目標価格を合成（価格欠損行は現在値なしで目標のみ）。
+      const tpCell = hasTp
+        ? sellTargetCell(r.avg, r.priced ? r.price : null, sigmaMap[r.code], tpParams, yen)
+        : "";
       if (!r.priced) {
-        // 価格欠損銘柄は現在値以降を「—」
+        // 価格欠損銘柄は現在値以降を「—」（利確目標はσがあれば出す）
         return (
           `<tr><td>${name} ${codeTag}</td><td>${qty}</td><td>${avg}</td>` +
-          `<td class="muted">—</td><td class="muted">—</td><td class="muted">—</td></tr>`
+          `<td class="muted">—</td><td class="muted">—</td><td class="muted">—</td>${tpCell}</tr>`
         );
       }
       const rate =
@@ -424,7 +451,7 @@ function renderHoldings(holdings) {
       return (
         `<tr><td>${name} ${codeTag}</td><td>${qty}</td><td>${avg}</td>` +
         `<td>${yen(r.price)}</td><td>${yen(r.marketValue)}</td>` +
-        `<td class="${gainLossClass(r.unrealized)}">${formatYen(r.unrealized)}${rate}</td></tr>`
+        `<td class="${gainLossClass(r.unrealized)}">${formatYen(r.unrealized)}${rate}</td>${tpCell}</tr>`
       );
     })
     .join("");
@@ -1713,9 +1740,9 @@ async function init() {
   renderAll();
   refreshIndicators(); // 客観スナップショットは取得でき次第あとから反映
   // 買い時ボード（TBK-0006）と場中価格（TBK-0008）。取得でき次第あとから反映
-  Promise.all([loadBuyLevels(), loadIntradayPrices()]).then(() => {
+  Promise.all([loadBuyLevels(), loadIntradayPrices(), loadVolatility()]).then(() => {
     renderBuyLevels(getBuyLevels(), codeToName, freshIntraday());
-    renderAll(); // 場中価格を保有銘柄の含み損益にも反映
+    renderAll(); // 場中価格と利確目標（TBK-0010）を保有カードに反映
   });
 
   if (!isConfigured()) {
