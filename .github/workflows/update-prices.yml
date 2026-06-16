@@ -86,10 +86,15 @@ jobs:
           JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
         run: python tools/gen_buy_levels.py
 
+      - name: Generate 利確目標用ボラティリティ（監視リスト銘柄・TBK-0010）
+        env:
+          JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
+        run: python tools/gen_volatility.py
+
       - name: Bump service worker cache version if prices changed
         run: |
           set -euo pipefail
-          if git diff --quiet -- data/latest_prices.json data/indicators data/indicators_universe.json data/buy_levels.json; then
+          if git diff --quiet -- data/latest_prices.json data/indicators data/indicators_universe.json data/buy_levels.json data/volatility.json; then
             echo "価格・指標・監視リストに変更なし（休市日など）。コミットしません。"
             echo "changed=false" >> "$GITHUB_ENV"
             exit 0
@@ -108,7 +113,7 @@ jobs:
           date=$(python -c "import json;print(json.load(open('data/latest_prices.json'))['date'])")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/latest_prices.json data/indicators data/indicators_universe.json data/buy_levels.json sw.js
+          git add data/latest_prices.json data/indicators data/indicators_universe.json data/buy_levels.json data/volatility.json sw.js
           git commit -m "最新終値・エントリー指標・監視リストを更新（基準日 ${date}）"
           git push
 

@@ -1,6 +1,6 @@
 // Service Worker: アプリシェルをキャッシュしオフライン閲覧を可能にする。
 // データの正は Google Drive。ここがキャッシュするのはアプリのコードと銘柄リストのみ。
-const CACHE = "tradebook-shell-v56";
+const CACHE = "tradebook-shell-v57";
 const ASSETS = [
   "./index.html",
   "./css/style.css",
@@ -16,6 +16,7 @@ const ASSETS = [
   "./js/config.js",
   "./js/buylevels.js",
   "./js/intraday.js",
+  "./js/selltarget.js",
   "./js/vendor/chart.umd.min.js",
   "./data/stocks.json",
   "./data/latest_prices.json",
@@ -44,6 +45,20 @@ self.addEventListener("fetch", (e) => {
   // 最新終値はネットワーク優先（オンライン時は最新を取得、失敗時はキャッシュへフォールバック）。
   // 日次で更新されるため、SW再インストールを待たずに新しい価格を反映できる。
   if (url.pathname.endsWith("/data/latest_prices.json")) {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+          return res;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+  // 利確目標用のボラティリティ（TBK-0010）も日次更新。ネットワーク優先＋取得分をキャッシュ。
+  // 未生成（404）でもアプリ側が劣化動作するため、ここで失敗してもキャッシュへフォールバックするだけ。
+  if (url.pathname.endsWith("/data/volatility.json")) {
     e.respondWith(
       fetch(e.request)
         .then((res) => {
