@@ -36,7 +36,7 @@ OUT_FILE = PUBLIC_ROOT / "data" / "volatility.json"
 
 # 利確幅パラメータ（変更はスキーマ変更扱い。TBK-0010 の改訂とセットで行うこと）
 SIGMA_WINDOW = 20   # σ算出の窓（日次リターン・営業日）
-TP_K = 2.5          # 利確幅 = min(cap, max(floor, k×σ20))。σ20=2%で +5%（現行一致）
+TP_K = 2.0          # 利確幅 = min(cap, max(floor, k×σ20))。TBK-0011 で 2.5→2.0 に改定（高ボラ銘柄の目標が遠すぎたため）
 TP_FLOOR = 0.05     # 利確幅の下限（現行+5%を死守）
 TP_CAP = 0.15       # 利確幅の上限（高ボラ銘柄の暴走防止）
 
