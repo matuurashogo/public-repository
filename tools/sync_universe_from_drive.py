@@ -11,10 +11,13 @@ TradeBook アプリは取引を Google Drive 上の単一マスター (TradeBook
 SA の drive.readonly で読める（ファイル自体はユーザー所有の通常の Drive ファイルのため）。
 
 環境変数:
-  GDRIVE_SA_JSON            サービスアカウントのキー JSON（本文そのもの。base64 でも可）
-  TRADEBOOK_DRIVE_FILE_ID   取引マスター TradeBook_master.json のファイルID
+  GDRIVE_SA_JSON            サービスアカウントのキー JSON（本文そのもの。base64 でも可）。必須。
+  TRADEBOOK_DRIVE_FILE_ID   取引マスターのファイルID（任意）。指定があれば優先して使うが、
+                            無効・取得失敗の場合はファイル名で自動検索してフォールバックする。
+                            未指定でもファイル名検索で取得するため、マスター再作成
+                            （split-brain 統合など）でIDが変わっても同期が壊れない。
 
-いずれかが未設定の場合は「スキップ」して終了コード 0 を返す（後方互換: Secret 未設定でも
+GDRIVE_SA_JSON が未設定の場合は「スキップ」して終了コード 0 を返す（後方互換: Secret 未設定でも
 ワークフロー全体は従来どおり動く）。
 
 使い方:
@@ -35,6 +38,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 PUBLIC_ROOT = HERE.parent
 UNIVERSE_FILE = PUBLIC_ROOT / "data" / "indicators_universe.json"
+
+# 取引マスターのファイル名（アプリ側 js/config.js の MASTER_FILENAME と一致させること）。
+MASTER_FILENAME = "TradeBook_master.json"
 
 # 4桁証券コード（先頭は数字、残り3桁は数字または英大文字）。gen_indicators.load_universe と同一定義。
 _CODE_RE = re.compile(r"[0-9][0-9A-Z]{3}")
@@ -70,6 +76,59 @@ def fetch_master(file_id: str, creds) -> dict:
     return json.loads(buf.getvalue().decode("utf-8"))
 
 
+def find_master_file_id(creds) -> str | None:
+    """SA に共有された取引マスターをファイル名で検索し、最新のファイルIDを返す（無ければ None）。
+
+    同名が複数あってもアプリ側 (drive.js) が次回同期で統合・1本化するため、ここでは最新を採用する。
+    """
+    from googleapiclient.discovery import build
+
+    service = build("drive", "v3", credentials=creds, cache_discovery=False)
+    resp = (
+        service.files()
+        .list(
+            q=f"name='{MASTER_FILENAME}' and trashed=false",
+            orderBy="modifiedTime desc",
+            fields="files(id,name,modifiedTime)",
+            spaces="drive",
+            pageSize=10,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
+        .execute()
+    )
+    files = resp.get("files", [])
+    if not files:
+        return None
+    if len(files) > 1:
+        print(
+            f"::warning::同名の取引マスターが {len(files)} 件見つかりました。最新を使用します。",
+            file=sys.stderr,
+        )
+    return files[0]["id"]
+
+
+def resolve_master(creds, file_id: str) -> dict:
+    """取引マスターを取得する。ファイルIDが有効ならそれを使い、無効・未指定なら
+    ファイル名検索で自動回復する（マスター再作成でIDが変わっても同期を継続できる）。"""
+    if file_id:
+        try:
+            return fetch_master(file_id, creds)
+        except Exception as e:  # noqa: BLE001 - ID失効時はファイル名検索へフォールバック
+            print(
+                "::warning::指定の TRADEBOOK_DRIVE_FILE_ID から取得できませんでした。"
+                f"ファイル名で再検索します: {e}",
+                file=sys.stderr,
+            )
+    found = find_master_file_id(creds)
+    if not found:
+        raise RuntimeError(
+            f"取引マスター ({MASTER_FILENAME}) が見つかりません。"
+            "SA への共有設定（閲覧者）を確認してください。"
+        )
+    return fetch_master(found, creds)
+
+
 def extract_codes(master: dict) -> list[str]:
     """取引マスターの trades[].code から、有効な4桁コードを重複なく昇順で返す。"""
     trades = master.get("trades", []) if isinstance(master, dict) else []
@@ -99,15 +158,15 @@ def merge_universe(existing: dict, new_codes: list[str]) -> tuple[dict, list[str
 def main() -> int:
     sa_json = os.environ.get("GDRIVE_SA_JSON", "").strip()
     file_id = os.environ.get("TRADEBOOK_DRIVE_FILE_ID", "").strip()
-    if not sa_json or not file_id:
+    if not sa_json:
         print(
-            "GDRIVE_SA_JSON / TRADEBOOK_DRIVE_FILE_ID が未設定のため、監視リストの自動同期をスキップします。"
+            "GDRIVE_SA_JSON が未設定のため、監視リストの自動同期をスキップします。"
         )
         return 0
 
     try:
         creds = _load_sa_credentials(sa_json)
-        master = fetch_master(file_id, creds)
+        master = resolve_master(creds, file_id)
     except Exception as e:  # noqa: BLE001 - CIではスキップ扱いにして既存処理を止めない
         print(f"::warning::Drive からの取引マスター取得に失敗しました（同期スキップ）: {e}", file=sys.stderr)
         return 0

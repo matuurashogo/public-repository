@@ -8,6 +8,7 @@ import {
   restoreToken,
   loadMaster,
   saveMaster,
+  takeSyncNotice,
 } from "./drive.js";
 import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { parseTradeText, normalizeOcrText } from "./parse.js";
@@ -875,7 +876,9 @@ async function syncFromDrive() {
     }
     renderAll();
     refreshIndicators();
-    setSync("ok", "保存済み");
+    // 重複マスターの統合などの一度きり通知があれば、同期表示に反映する
+    const notice = takeSyncNotice();
+    setSync("ok", notice || "保存済み");
     $("signin-bar").classList.add("hidden");
   } catch (e) {
     console.error(e);

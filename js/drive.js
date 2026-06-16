@@ -3,6 +3,7 @@
 // Google Identity Services (GIS) の gsi/client は index.html で読み込む。
 
 import { CONFIG } from "./config.js";
+import { mergeMasters } from "./store.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const TOKEN_KEY = "tb_drive_token"; // localStorage: { access_token, expiry(ms) }
@@ -12,6 +13,14 @@ let _accessToken = null;
 let _tokenExpiry = 0; // アクセストークンの失効時刻(ms)。0なら未取得
 let _fileId = null; // マスターファイルのDrive上のID（判明後にキャッシュ）
 let _knownModifiedTime = null; // 最後に読み書きしたサーバ側の modifiedTime（衝突検出用）
+let _lastNotice = null; // 直近の同期で利用者に伝えるべき一度きりの通知（例: 重複統合）
+
+// 直近の同期通知を一度だけ取り出す（取得後はクリア）。呼び出し側でUI表示に使う。
+export function takeSyncNotice() {
+  const n = _lastNotice;
+  _lastNotice = null;
+  return n;
+}
 
 // 設定済みか（プレースホルダのままでないか）
 export function isConfigured() {
@@ -187,8 +196,79 @@ async function driveFetch(url, opts = {}) {
   return res;
 }
 
+// 指定IDのファイル本体（JSON）をダウンロードする。
+async function downloadFileJson(id) {
+  const url = `https://www.googleapis.com/drive/v3/files/${id}?alt=media`;
+  const res = await driveFetch(url);
+  if (!res.ok) throw new Error(`ファイル読込に失敗: ${res.status}`);
+  return await res.json();
+}
+
+// 指定IDのファイルに master を上書き保存し、更新後メタ（modifiedTime含む）を返す。
+async function overwriteFile(id, master) {
+  const url = `https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media&fields=id,modifiedTime`;
+  const res = await driveFetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(master),
+  });
+  if (!res.ok) throw new Error(`統合内容の書き戻しに失敗: ${res.status}`);
+  return await res.json();
+}
+
+// 指定IDのファイルをゴミ箱へ移す（完全削除ではなく復旧可能な trashed=true）。
+async function trashFile(id) {
+  const url = `https://www.googleapis.com/drive/v3/files/${id}?fields=id`;
+  const res = await driveFetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trashed: true }),
+  });
+  return res.ok;
+}
+
+// 同名マスターが複数存在する（split-brain）場合の自動回復。
+// 全ファイルを mergeMasters で統合し、最新ファイル1本へ書き戻して残りはゴミ箱へ送る。
+// いずれかのダウンロードに失敗した場合は、データ消失を避けるため統合を中止し、
+// 最新ファイルをそのまま採用する（非破壊フォールバック）。
+async function consolidateDuplicates(files) {
+  const canonical = files[0]; // orderBy modifiedTime desc により先頭が最新
+  let merged = null;
+  try {
+    for (const f of files) {
+      const content = await downloadFileJson(f.id);
+      merged = merged === null ? content : mergeMasters(merged, content);
+    }
+  } catch (e) {
+    console.warn("重複マスターの統合を中止（読込失敗）。最新ファイルを採用します:", e);
+    _fileId = canonical.id;
+    _knownModifiedTime = canonical.modifiedTime || null;
+    return _fileId;
+  }
+
+  // 統合結果を最新ファイルへ書き戻す
+  const saved = await overwriteFile(canonical.id, merged);
+  _fileId = canonical.id;
+  _knownModifiedTime = saved.modifiedTime || canonical.modifiedTime || null;
+
+  // 余分なファイルをゴミ箱へ（統合成功後にのみ実施＝書き戻し前に消さない）
+  let trashed = 0;
+  for (const f of files.slice(1)) {
+    try {
+      if (await trashFile(f.id)) trashed += 1;
+    } catch (e) {
+      console.warn("重複マスターのゴミ箱移動に失敗:", f.id, e);
+    }
+  }
+  _lastNotice =
+    `重複していたマスター ${files.length} 件を1つに統合しました` +
+    `（余分な ${trashed} 件はゴミ箱へ移動）。`;
+  console.warn(_lastNotice);
+  return _fileId;
+}
+
 // マスターファイルのIDを検索（無ければ null）。modifiedTime を更新日時として保持する。
-// 同名ファイルが複数ある場合（split-brain）は最終更新が最も新しいものを採用する。
+// 同名ファイルが複数ある場合（split-brain）は全件を統合して1本に自動回復する。
 async function findMasterFileId() {
   const q = encodeURIComponent(
     `name='${CONFIG.MASTER_FILENAME}' and trashed=false`
@@ -199,12 +279,15 @@ async function findMasterFileId() {
   const res = await driveFetch(url);
   if (!res.ok) throw new Error(`Drive検索に失敗: ${res.status}`);
   const data = await res.json();
-  if (data.files && data.files.length > 0) {
-    _fileId = data.files[0].id; // orderBy で先頭が最新
-    _knownModifiedTime = data.files[0].modifiedTime || null;
+  const files = data.files || [];
+  if (files.length === 0) return null;
+  if (files.length === 1) {
+    _fileId = files[0].id;
+    _knownModifiedTime = files[0].modifiedTime || null;
     return _fileId;
   }
-  return null;
+  // 同名マスターが複数 = split-brain。データ消失を防ぐため統合して1本化する。
+  return await consolidateDuplicates(files);
 }
 
 // 現在のサーバ側 modifiedTime を取得する（保存前の衝突検出用）。
@@ -221,10 +304,7 @@ export async function loadMaster() {
   if (!_accessToken) throw new Error("未サインインです。");
   const id = await findMasterFileId();
   if (!id) return null;
-  const url = `https://www.googleapis.com/drive/v3/files/${id}?alt=media`;
-  const res = await driveFetch(url);
-  if (!res.ok) throw new Error(`マスター読込に失敗: ${res.status}`);
-  return await res.json();
+  return await downloadFileJson(id);
 }
 
 // 保存時にサーバ側が新しくなっていたら投げるエラー（呼び出し側でマージ＋再保存する）。
