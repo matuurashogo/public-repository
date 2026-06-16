@@ -94,7 +94,9 @@ jobs:
       - name: Bump service worker cache version if prices changed
         run: |
           set -euo pipefail
-          if git diff --quiet -- data/latest_prices.json data/indicators data/indicators_universe.json data/buy_levels.json data/volatility.json; then
+          # git diff は未追跡（新規）ファイルを検知しないため、git status --porcelain で
+          # 「変更＋新規」の両方を見る。volatility.json の初回生成（未追跡）も確実に拾う。
+          if [ -z "$(git status --porcelain -- data/latest_prices.json data/indicators data/indicators_universe.json data/buy_levels.json data/volatility.json)" ]; then
             echo "価格・指標・監視リストに変更なし（休市日など）。コミットしません。"
             echo "changed=false" >> "$GITHUB_ENV"
             exit 0
