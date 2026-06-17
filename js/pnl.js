@@ -23,7 +23,8 @@ export function withMatsuiFees(trades, rate = MATSUI_BOX_RATE) {
   const byDay = new Map(); // date -> { total, items: [{ idx, amount }] }
   trades.forEach((t, idx) => {
     if ((t.account || "特定") !== "特定") return; // NISA等は無料扱い
-    const amount = Number(t.price) * Number(t.quantity);
+    const raw = Number(t.price) * Number(t.quantity);
+    const amount = Number.isFinite(raw) ? raw : 0; // 不正値(空欄/NaN)は0扱い＝当日合計を汚染させない
     const d = byDay.get(t.date) || { total: 0, items: [] };
     d.total += amount;
     d.items.push({ idx, amount });
@@ -79,6 +80,11 @@ export function calcRealized(trades) {
     const qty = Number(tr.quantity);
     const price = Number(tr.price);
     const fee = Number(tr.fee) || 0; // 手数料（未設定は0）
+    // 数量・単価が数値でない取引は保有数量・原価を NaN 汚染するためスキップ（警告のみ）
+    if (!Number.isFinite(qty) || !Number.isFinite(price)) {
+      warnings.push(`${tr.date} ${code}: 数量または単価が不正(${tr.quantity}/${tr.price})のためスキップしました。`);
+      continue;
+    }
     if (!holdings[code]) holdings[code] = { quantity: 0, cost: 0 };
     const h = holdings[code];
 
