@@ -375,6 +375,8 @@ td.muted { color: #b0b0b5; }
   padding: 1px 5px; border-radius: 6px; white-space: nowrap; vertical-align: middle; }
 .bl-tsure-good { background: #e6f7ec; color: #1e8e4a; }
 .bl-tsure-bad { background: #fdecec; color: #c0392b; }
+/* 観測中チップ（candidate・観測層／TBK-0012）: 急落未満。連れ安/個別の判定は較正前のため中立色。 */
+.bl-tsure-watch { background: #eef0f2; color: #5a6570; }
 
 /* 監視銘柄の編集（買い時ボード内・TBK-0007） */
 .bl-watch-toggle { display: block; width: 100%; margin-top: 10px; padding: 10px; font-size: 13px; }

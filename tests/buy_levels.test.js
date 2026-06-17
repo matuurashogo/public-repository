@@ -2,7 +2,13 @@
 //   実行: node --test tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { levelState, fmtDist, buildBoard, tsureyasuBadge } from "../js/buylevels.js";
+import {
+  levelState,
+  fmtDist,
+  buildBoard,
+  tsureyasuBadge,
+  tsureyasuCandidate,
+} from "../js/buylevels.js";
 
 const payload = {
   updated: "2026-06-10",
@@ -79,6 +85,27 @@ test("tsureyasuBadge: 連れ安=🟢 / 個別急落=🔴 / 無しは null（TBK-
   assert.equal(tsureyasuBadge(null), null);
   assert.equal(tsureyasuBadge({ event: false, tag: "連れ安" }), null);
   assert.equal(tsureyasuBadge({ event: true }), null);
+  // candidate（tag/event なし）には色バッジを出さない（TBK-0012）
+  assert.equal(
+    tsureyasuBadge({ tier: "candidate", event: false, tag: null, resid: -0.03 }),
+    null
+  );
+});
+
+test("tsureyasuCandidate: candidate層は中立チップ・色判定なし（TBK-0012）", () => {
+  const c = tsureyasuCandidate({
+    tier: "candidate",
+    event: false,
+    tag: null,
+    self_r5: -0.1,
+    resid: -0.03,
+  });
+  assert.equal(c.cls, "bl-tsure-watch");
+  assert.ok(c.text.includes("観測"));
+  assert.ok(c.text.includes("-3.0pt"));
+  // confirmed / 無し / null は candidate チップを出さない
+  assert.equal(tsureyasuCandidate({ tier: "confirmed", event: true, tag: "連れ安" }), null);
+  assert.equal(tsureyasuCandidate(null), null);
 });
 
 test("buildBoard: tsureyasu を行に引き継ぐ（無い銘柄は null）", () => {

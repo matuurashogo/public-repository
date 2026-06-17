@@ -36,8 +36,9 @@ export function fmtDist(level) {
   return `あと${(-level.dist * 100).toFixed(1)}%`;
 }
 
-// 連れ安度バッジ（TBK-0009）。急落イベント銘柄のみ tsureyasu を持つ。
+// 連れ安度バッジ（confirmed・検証済み層／TBK-0009）。急落イベント成立銘柄のみ。
 // 連れ安=🟢（買える押し目）/ 個別急落=🔴（深くても見送り）。無ければ null。
+// candidate 層は tag/event を持たないため、ここでは自然に null になる（色判定は出さない）。
 export function tsureyasuBadge(tsureyasu) {
   if (!tsureyasu || !tsureyasu.event || !tsureyasu.tag) return null;
   const good = tsureyasu.tag === "連れ安";
@@ -48,6 +49,21 @@ export function tsureyasuBadge(tsureyasu) {
     text: good ? "🟢連れ安" : "🔴個別急落",
     cls: good ? "bl-tsure-good" : "bl-tsure-bad",
     title: `5日${r5}・${resid}（${good ? "業種なみの連れ安＝買える押し目" : "業種より大きく下落＝見送り"}）`,
+  };
+}
+
+// 観測中チップ（candidate・観測層／TBK-0012）。急落未満だが candidate_drop 以下に下げた銘柄。
+// 連れ安/個別の検証済み判定は付けず、生 resid だけを中立色で表示する（較正データ収集用）。
+// candidate 以外（confirmed・無し）は null。
+export function tsureyasuCandidate(tsureyasu) {
+  if (!tsureyasu || tsureyasu.tier !== "candidate") return null;
+  const r5 = typeof tsureyasu.self_r5 === "number" ? `${(tsureyasu.self_r5 * 100).toFixed(1)}%` : "";
+  const residPt =
+    typeof tsureyasu.resid === "number" ? `${(tsureyasu.resid * 100).toFixed(1)}pt` : "";
+  return {
+    text: `👀観測 ${residPt}`,
+    cls: "bl-tsure-watch",
+    title: `5日${r5}・業種差${residPt}（急落未満の観測層。連れ安/個別の判定は較正前のため未確定）`,
   };
 }
 
@@ -145,9 +161,10 @@ export function renderBuyLevels(payload, codeToName, intraday = null) {
     const closeText = Number.isFinite(livePrice)
       ? livePrice.toLocaleString()
       : Number(r.close).toLocaleString();
-    const badge = tsureyasuBadge(r.tsureyasu);
-    const badgeHtml = badge
-      ? `<span class="bl-tsure ${badge.cls}" title="${badge.title}">${badge.text}</span>`
+    // confirmed は色バッジ、candidate は中立チップ（confirmed 優先・両立しない）
+    const chip = tsureyasuBadge(r.tsureyasu) || tsureyasuCandidate(r.tsureyasu);
+    const badgeHtml = chip
+      ? `<span class="bl-tsure ${chip.cls}" title="${chip.title}">${chip.text}</span>`
       : "";
     const tr = document.createElement("tr");
     tr.innerHTML =

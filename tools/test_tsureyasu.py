@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gen_buy_levels import (  # noqa: E402
+    CANDIDATE_DROP,
     CRASH_WINDOW,
     HARD_DROP,
     build_tsureyasu,
@@ -83,12 +84,37 @@ def test_build_tsureyasu_tsure_vs_kobetsu():
     # 連れ安: 業種なみ(-16%)。残差 = -0.16 -(-0.15) = -0.01 > -0.03 → 連れ安
     tsure = build_tsureyasu([100.0] * 65 + [99, 97, 95, 90, 84], "3650", sector_means)
     assert tsure is not None and tsure["event"] is True
+    assert tsure["tier"] == "confirmed"  # 急落イベント → confirmed
     assert tsure["tag"] == "連れ安"
     assert abs(tsure["resid"] - round(tsure["self_r5"] - (-0.15), 4)) < 1e-9
 
     # 個別急落: 業種(-15%)より大きく下げ(-30%)。残差 = -0.15 ≤ -0.03 → 個別急落
     kobetsu = build_tsureyasu([100.0] * 65 + [95, 90, 85, 78, 70], "3650", sector_means)
-    assert kobetsu is not None and kobetsu["tag"] == "個別急落"
+    assert kobetsu is not None and kobetsu["tier"] == "confirmed"
+    assert kobetsu["tag"] == "個別急落"
+
+
+def test_build_tsureyasu_candidate():
+    # 急落未満（横ばい履歴 → σ=0でσルール無効、hard_drop(-15%)にも未達）だが
+    # r5 = -10% ≤ CANDIDATE_DROP(-8%) → candidate（観測層）。tag は付かず生 resid のみ。
+    sector_means = {"3650": -0.07}
+    cand = build_tsureyasu([100.0] * 65 + [98, 96, 94, 92, 90], "3650", sector_means)
+    assert cand is not None
+    assert cand["tier"] == "candidate"
+    assert cand["event"] is False  # 後方互換: 既存読み手は色バッジを出さない
+    assert cand["tag"] is None  # 検証主張なし
+    assert cand["self_r5"] is not None and cand["resid"] is not None
+    assert abs(cand["self_r5"] - (-0.10)) < 1e-9
+
+
+def test_build_tsureyasu_below_candidate():
+    # r5 = -5% は CANDIDATE_DROP(-8%) に未達 → どの層にも該当せず None
+    sector_means = {"3650": -0.04}
+    assert build_tsureyasu([100.0] * 65 + [99, 98, 97, 96, 95], "3650", sector_means) is None
+    # しきい超え: -8.5%（CANDIDATE_DROP=-8% を下回る）は candidate 側
+    assert abs(CANDIDATE_DROP - (-0.08)) < 1e-12
+    edge = build_tsureyasu([100.0] * 65 + [98, 96, 94, 92, 91.5], "3650", sector_means)
+    assert edge is not None and edge["tier"] == "candidate"
 
 
 def test_build_tsureyasu_skips():
@@ -117,6 +143,8 @@ def main() -> None:
         test_crash_state_no_event,
         test_compute_sector_means,
         test_build_tsureyasu_tsure_vs_kobetsu,
+        test_build_tsureyasu_candidate,
+        test_build_tsureyasu_below_candidate,
         test_build_tsureyasu_skips,
         test_classify_threshold,
     ]

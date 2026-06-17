@@ -15,8 +15,9 @@
 
 付随情報:
   - rebound = 陽転フラグ（最新終値 > 前日終値）。
-  - tsureyasu = 連れ安度バッジ（TBK-0009）。急落イベント成立銘柄のみ、自銘柄の5日下落率と
-    同業種ユニバース平均の差（残差）で「連れ安 / 個別急落」を判定する（HypoLab H84 準拠）。
+  - tsureyasu = 連れ安度（TBK-0009 / 2段化は TBK-0012）。自銘柄の5日下落率と同業種ユニバース
+    平均の差（残差）を出す。confirmed（急落イベント・HypoLab H84 準拠）は「連れ安 / 個別急落」を
+    判定し、candidate（急落未満の観測層）は tag を付けず生 resid のみ（較正用）。
 
 jquants-data の場所は gen_indicators.py と同じ優先順で自動検出する:
   1. 環境変数 JQUANTS_PARQUET_REPO
@@ -57,6 +58,7 @@ SIGMA_MULT = 3.0        # 急落閾値: r5 ≤ −3σ√5
 HARD_DROP = -0.15       # 急落閾値: または r5 ≤ −15%
 MIN_CRASH_DROP = -0.05  # σルールの下限ガード（低ボラ株の微小変動を急落としない。HypoLabの高ボラ母集団の代替）
 TSUREYASU_RESID_THRESHOLD = -0.03  # 残差 ≤ これ → 個別急落、それ以外 → 連れ安（暫定・較正で確定）
+CANDIDATE_DROP = -0.08  # candidate（観測中）層の下落しきい（TBK-0012）。急落未満だが r5 ≤ これ で観測対象
 EXCLUDE_SECTOR = "9999"  # 業種平均から除く（その他）
 MIN_SECTOR_PRICE = 100.0  # 業種平均ユニバースの最低終値（H84 ユニバースの簡略版）
 
@@ -258,23 +260,34 @@ def classify_tsureyasu(resid: float, threshold: float = TSUREYASU_RESID_THRESHOL
 def build_tsureyasu(
     closes: list[float], sector: str | None, sector_means: dict[str, float]
 ) -> dict | None:
-    """1銘柄の連れ安度を組み立てる。急落イベントかつ業種平均が得られた時だけ dict、他は None。"""
+    """1銘柄の連れ安度を組み立てる（2段・TBK-0012）。
+
+    - confirmed: 急落イベント成立（HYP-0011/H84 の検証ドメイン）→ 連れ安/個別急落の tag を付与。
+    - candidate: 急落未満だが r5 ≤ CANDIDATE_DROP → tag は付けず生 resid のみ（較正用の観測層）。
+    どちらにも該当しない、または業種平均が得られない場合は None。
+    """
     st = crash_state(closes)
-    if not st["event"]:
+    r5 = st["r5"]
+    if r5 is None:
+        return None
+    confirmed = bool(st["event"])
+    candidate = (not confirmed) and (r5 <= CANDIDATE_DROP)
+    if not (confirmed or candidate):
         return None
     if not sector or sector == EXCLUDE_SECTOR:
         return None
     smean = sector_means.get(sector)
     if smean is None:
         return None
-    resid = st["r5"] - smean
+    resid = r5 - smean
     return {
-        "event": True,
-        "self_r5": round(float(st["r5"]), 4),
+        "tier": "confirmed" if confirmed else "candidate",
+        "event": confirmed,  # 後方互換: 既存の読み手は event を見る（candidate は False）
+        "self_r5": round(float(r5), 4),
         "sector": str(sector),
         "sector_r5": round(float(smean), 4),
         "resid": round(float(resid), 4),
-        "tag": classify_tsureyasu(resid),
+        "tag": classify_tsureyasu(resid) if confirmed else None,  # candidate は検証主張なし
     }
 
 
@@ -386,9 +399,10 @@ def main() -> int:
         print("計算可能な銘柄がありません（履歴不足の可能性）。", file=sys.stderr)
         return 1
 
-    n_tsure = sum(1 for s in payload["stocks"] if "tsureyasu" in s)
+    n_conf = sum(1 for s in payload["stocks"] if s.get("tsureyasu", {}).get("tier") == "confirmed")
+    n_cand = sum(1 for s in payload["stocks"] if s.get("tsureyasu", {}).get("tier") == "candidate")
     if sector_means:
-        print(f"  連れ安度: {n_tsure}銘柄が急落イベント該当（連れ安/個別急落を判定）。")
+        print(f"  連れ安度: confirmed（急落イベント）{n_conf}銘柄 / candidate（観測層）{n_cand}銘柄。")
 
     missing = [c for c in universe if c not in {s["code"] for s in payload["stocks"]}]
     for c in missing:

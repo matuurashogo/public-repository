@@ -4,10 +4,10 @@
 
 | 項目 | 値 |
 |------|---|
-| **Status** | `Accepted` |
+| **Status** | `Superseded` |
 | **Date** | 2026-06-13 |
 | **Supersedes** | — |
-| **Superseded by** | — |
+| **Superseded by** | TBK-0012（連れ安度を confirmed/candidate の2段に拡張） |
 | **関連** | TBK-0006（買いレベルのデータ契約。本ADRはそれへのフィールド追加） |
 
 ## ❓ コンテキスト（背景と課題）
