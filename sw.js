@@ -1,6 +1,6 @@
 // Service Worker: アプリシェルをキャッシュしオフライン閲覧を可能にする。
 // データの正は Google Drive。ここがキャッシュするのはアプリのコードと銘柄リストのみ。
-const CACHE = "tradebook-shell-v61";
+const CACHE = "tradebook-shell-v62";
 const ASSETS = [
   "./index.html",
   "./css/style.css",
