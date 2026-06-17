@@ -230,6 +230,10 @@ def crash_state(closes: list[float]) -> dict:
     event = r5 <= HARD_DROP
     if not event and sigma is not None and sigma > 0:
         # σルールは下限ガード（最低5%下落）も満たす場合のみ。横ばい(σ=0)や微小変動を弾く。
+        # 注: σルールはボラ依存。σ>約2.24%（≒-3σ√5 が -15% より深い）の高ボラ銘柄では
+        # hard_drop に吸収され冗長になるが、低ボラ銘柄では -15% 未満でも銘柄固有の異常下落を
+        # 拾う（＝デッドコードではない）。SIGMA_MULT を下げると confirmed ゲートが緩み、H84 の
+        # 検証範囲を超える（TBK-0012 が candidate 層で回避した乖離）ため、ここは変更しない。
         event = r5 <= -SIGMA_MULT * sigma * math.sqrt(CRASH_WINDOW) and r5 <= MIN_CRASH_DROP
     return {"r5": r5, "sigma": sigma, "event": bool(event)}
 
