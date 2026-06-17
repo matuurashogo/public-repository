@@ -99,7 +99,8 @@ def from_equity_master(path: str) -> dict[str, str]:
                 continue
             row = json.loads(line)
             code4 = to_code4(row.get("Code") or row.get("code") or "")
-            if not re.fullmatch(r"\d{4}", code4):
+            # 4桁の証券コード（数字のみ、または新形式の英数字 例 130A）を許可
+            if not re.fullmatch(r"[0-9][0-9A-Z]{3}", code4):
                 continue
             name = (row.get("CompanyName") or row.get("company_name") or "").strip()
             if name:
@@ -117,7 +118,8 @@ def from_subsector_master(path: str) -> dict[str, str]:
                 continue
             row = json.loads(line)
             code4 = to_code4(row.get("code", ""))
-            if not re.fullmatch(r"\d{4}", code4):
+            # 4桁の証券コード（数字のみ、または新形式の英数字 例 130A）を許可
+            if not re.fullmatch(r"[0-9][0-9A-Z]{3}", code4):
                 continue
             name = extract_name(row.get("notes", ""))
             if name:
