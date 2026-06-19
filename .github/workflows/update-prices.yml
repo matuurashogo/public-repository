@@ -66,7 +66,7 @@ jobs:
       - name: Generate latest_prices.json
         env:
           JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
-        run: python tools/gen_prices.py
+        run: python TradeBook/tools/gen_prices.py
 
       # Drive の取引マスターから売買銘柄を読み、監視リストへ自動追記する。
       # Secret 未設定（GDRIVE_SA_JSON / TRADEBOOK_DRIVE_FILE_ID）の場合はスクリプト側でスキップされる。
@@ -74,48 +74,48 @@ jobs:
         env:
           GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
           TRADEBOOK_DRIVE_FILE_ID: ${{ secrets.TRADEBOOK_DRIVE_FILE_ID }}
-        run: python tools/sync_universe_from_drive.py
+        run: python TradeBook/tools/sync_universe_from_drive.py
 
       - name: Generate エントリー指標スナップショット（監視リスト銘柄）
         env:
           JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
-        run: python tools/gen_indicators.py
+        run: python TradeBook/tools/gen_indicators.py
 
       - name: Generate 買いレベルボード（監視リスト銘柄・TBK-0006）
         env:
           JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
-        run: python tools/gen_buy_levels.py
+        run: python TradeBook/tools/gen_buy_levels.py
 
       - name: Generate 利確目標用ボラティリティ（監視リスト銘柄・TBK-0010）
         env:
           JQUANTS_PARQUET_REPO: ${{ github.workspace }}/jq
-        run: python tools/gen_volatility.py
+        run: python TradeBook/tools/gen_volatility.py
 
       - name: Bump service worker cache version if prices changed
         run: |
           set -euo pipefail
           # git diff は未追跡（新規）ファイルを検知しないため、git status --porcelain で
           # 「変更＋新規」の両方を見る。volatility.json の初回生成（未追跡）も確実に拾う。
-          if [ -z "$(git status --porcelain -- data/latest_prices.json data/indicators data/indicators_universe.json data/buy_levels.json data/volatility.json)" ]; then
+          if [ -z "$(git status --porcelain -- TradeBook/data/latest_prices.json TradeBook/data/indicators TradeBook/data/indicators_universe.json TradeBook/data/buy_levels.json TradeBook/data/volatility.json)" ]; then
             echo "価格・指標・監視リストに変更なし（休市日など）。コミットしません。"
             echo "changed=false" >> "$GITHUB_ENV"
             exit 0
           fi
           echo "changed=true" >> "$GITHUB_ENV"
           # sw.js のキャッシュ版数を +1 して、PWA に新しい価格を確実に配信する。
-          current=$(grep -oE 'tradebook-shell-v[0-9]+' sw.js | grep -oE '[0-9]+$')
+          current=$(grep -oE 'tradebook-shell-v[0-9]+' TradeBook/sw.js | grep -oE '[0-9]+$')
           next=$((current + 1))
-          sed -i "s/tradebook-shell-v${current}/tradebook-shell-v${next}/" sw.js
+          sed -i "s/tradebook-shell-v${current}/tradebook-shell-v${next}/" TradeBook/sw.js
           echo "sw cache: v${current} -> v${next}"
 
       - name: Commit and push
         if: env.changed == 'true'
         run: |
           set -euo pipefail
-          date=$(python -c "import json;print(json.load(open('data/latest_prices.json'))['date'])")
+          date=$(python -c "import json;print(json.load(open('TradeBook/data/latest_prices.json'))['date'])")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/latest_prices.json data/indicators data/indicators_universe.json data/buy_levels.json data/volatility.json sw.js
+          git add TradeBook/data/latest_prices.json TradeBook/data/indicators TradeBook/data/indicators_universe.json TradeBook/data/buy_levels.json TradeBook/data/volatility.json TradeBook/sw.js
           git commit -m "最新終値・エントリー指標・監視リストを更新（基準日 ${date}）"
           git push
 

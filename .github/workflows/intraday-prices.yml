@@ -60,13 +60,14 @@ jobs:
           # data/intraday_prices.json を orphan ブランチ intraday へ force-push する。
           # 取得結果が無い回は push しない（読み手は古い asOf を検知して終値へフォールバック）。
           push_intraday() {
-            if [ ! -f data/intraday_prices.json ]; then
+            if [ ! -f TradeBook/data/intraday_prices.json ]; then
               echo "取得結果なし（休場・ソース停止など）。今回は intraday ブランチを更新しません。"
               return 0
             fi
             rm -rf /tmp/intraday
             mkdir -p /tmp/intraday/data
-            cp data/intraday_prices.json /tmp/intraday/data/
+            # orphan ブランチ intraday のレイアウトは data/ 直下で固定（js/intraday.js の取得URLと一致）。
+            cp TradeBook/data/intraday_prices.json /tmp/intraday/data/
             ( cd /tmp/intraday \
               && git init -q -b intraday \
               && git config user.name "github-actions[bot]" \
@@ -77,7 +78,7 @@ jobs:
           }
 
           while :; do
-            python3 tools/fetch_intraday_prices.py \
+            python3 TradeBook/tools/fetch_intraday_prices.py \
               || echo "::warning::取得スクリプトが非ゼロ終了。次の回で再試行します。"
             push_intraday || echo "::warning::intraday ブランチへの push に失敗。次の回で再試行します。"
             now=$(date -u +%s)

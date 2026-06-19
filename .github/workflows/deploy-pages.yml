@@ -1,0 +1,49 @@
+name: Deploy TradeBook to GitHub Pages
+
+# アプリ実体は TradeBook/ サブフォルダにあるため、GitHub Pages の
+# 「ブランチから配信（ルート/ docs のみ可）」では配信できない。
+# そこで Actions で TradeBook/ をアーティファクトとしてアップロードし、
+# サイトのルートとして配信する。これによりアプリ内の相対パス・PWA
+# （sw.js / manifest.webmanifest）は無改変で動作する。
+#
+# 有効化手順: リポジトリ Settings → Pages → Build and deployment →
+#             Source を「GitHub Actions」に設定する。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "TradeBook/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時デプロイは1つに制限（進行中はキャンセルしない）。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload TradeBook/ as site root
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: TradeBook
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
