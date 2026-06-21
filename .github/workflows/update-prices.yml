@@ -23,6 +23,10 @@ on:
 
 permissions:
   contents: write
+  # GITHUB_TOKEN による push は他ワークフロー（deploy-pages.yml の push トリガー）を
+  # 起動しない（再帰防止のGitHub仕様）。そこでデータ変更時に deploy-pages を
+  # workflow_dispatch で明示起動するため actions: write を付与する。
+  actions: write
 
 concurrency:
   group: update-prices
@@ -118,6 +122,15 @@ jobs:
           git add TradeBook/data/latest_prices.json TradeBook/data/indicators TradeBook/data/indicators_universe.json TradeBook/data/buy_levels.json TradeBook/data/volatility.json TradeBook/sw.js
           git commit -m "最新終値・エントリー指標・監視リストを更新（基準日 ${date}）"
           git push
+
+      # GITHUB_TOKEN による上記 push は deploy-pages.yml（push トリガー）を起動しないため、
+      # データを更新したときだけ Pages デプロイを明示的に起動してライブへ反映する。
+      # workflow_dispatch は GITHUB_TOKEN でも起動できる（push トリガーの再帰防止の例外）。
+      - name: Trigger Pages deploy
+        if: env.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-pages.yml --ref main
 
       - name: Clean up
         if: always()
