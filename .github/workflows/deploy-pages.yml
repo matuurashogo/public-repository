@@ -35,6 +35,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # update-prices.yml はデータを push した直後に本ワークフローを
+          # workflow_dispatch で起動する。dispatch の ref 解決が push 伝播より
+          # 速いと、checkout 既定（dispatch 時の head_sha）では push 前の旧
+          # コミットを取得してしまい、ライブが旧データのまま固定される（実害発生）。
+          # そこで ref を main 明示にして、ジョブ実行時点の main 先端（＝最新
+          # データ）を必ず取得する。push トリガー時も main 先端と同一で無害。
+          ref: main
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
