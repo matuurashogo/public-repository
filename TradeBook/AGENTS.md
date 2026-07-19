@@ -35,6 +35,18 @@
 
 外部依存（jquants-data）は **read-only**。アプリは生成済み JSON を読むだけで、生成ロジックを持ち込まない。
 
+### データ生成ツールの入力切替（TBK-0013）
+
+`tools/gen_*.py` の入力は共通層 `tools/datasource.py` 経由で二系統から選べる:
+
+| バックエンド | 切替 | 入力 |
+|---|---|---|
+| `local`（既定） | — | jquants-data の Parquet（従来。`JQUANTS_PARQUET_REPO` or 兄弟ディレクトリ） |
+| `r2` | `TRADEBOOK_DATA_SOURCE=r2` | QDP silver（`r2://<bucket>/qdp/silver/fact_prices_daily.parquet` / `dim_listed.parquet`。要 `R2_*` 環境変数・duckdb） |
+
+どちらも戻り値は従来列名に正規化される（`trading_value`←`turnover_value` 等）。
+**adj_high / adj_low は r2 にしか無い**（local で要求すると ValueError。支持線・抵抗線系はこれに依存）。
+
 ## 🚀 主要コマンド
 
 ```bash
@@ -46,7 +58,11 @@ python tools/gen_prices.py        # 最新終値
 python tools/gen_indicators.py    # エントリー指標スナップショット
 python tools/gen_buy_levels.py    # 買い時ボード
 python tools/gen_volatility.py    # 利確目標用ボラティリティ
-python tools/gen_stocks.py        # 銘柄名マスター（private データ依存）
+python tools/gen_stocks.py        # 銘柄名マスター（private データ依存。r2 なら単体生成可）
+
+# R2（QDP silver）から生成する場合（TBK-0013。要 R2_* 環境変数・duckdb）
+TRADEBOOK_DATA_SOURCE=r2 python tools/gen_prices.py
+python tools/eval_datasource_parity.py --days 30   # local/r2 突合の Code-grader
 ```
 
 > デプロイ: アプリ実体は `TradeBook/` にあり、ルートの `.github/workflows/deploy-pages.yml` が
@@ -62,6 +78,7 @@ node --test tests/*.test.js
 python tools/test_gen_indicators.py
 python tools/test_gen_buy_levels.py
 python tools/test_gen_volatility.py
+python tools/test_datasource.py
 ```
 
 ## ⚠️ 既知のミスパターン
@@ -73,6 +90,8 @@ python tools/test_gen_volatility.py
 - 場中価格は**表示専用**。判定・通知・実現損益は終値ベースのまま混ぜない。古い asOf（90分超）は終値へフォールバック。
 - 価格データ更新時は `sw.js` のキャッシュ版数を上げないと PWA に新データが届かない（update-prices.yml が自動で +1 する）。
 - リポジトリ再配置により、ワークフローのパスは `TradeBook/tools/...`・`TradeBook/data/...` 基準。`tools/*.py` 自体は `__file__` で自己解決するため cwd 非依存。
+- `TRADEBOOK_DATA_SOURCE=r2` で gen を実行すると出力 JSON の `source` ラベルが変わる（値は同一・TBK-0013 で検証済み）。コミット前にどちらの経路で生成したかを意識すること。
+- R2 の CREATE SECRET SQL を例外・ログへ出さない（鍵漏洩。`datasource.py` は握り潰す実装になっている——変更時に壊さないこと）。
 
 ## 📝 ADR 参照
 

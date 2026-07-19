@@ -19,6 +19,7 @@
     平均の差（残差）を出す。confirmed（急落イベント・HypoLab H84 準拠）は「連れ安 / 個別急落」を
     判定し、candidate（急落未満の観測層）は tag を付けず生 resid のみ（較正用）。
 
+入力は datasource 層（TBK-0013）経由。TRADEBOOK_DATA_SOURCE=r2 で QDP R2 から読める。
 jquants-data の場所は gen_indicators.py と同じ優先順で自動検出する:
   1. 環境変数 JQUANTS_PARQUET_REPO
   2. 兄弟ディレクトリ ../jquants-data
@@ -30,17 +31,14 @@ jquants-data の場所は gen_indicators.py と同じ優先順で自動検出す
 
 from __future__ import annotations
 
-import glob
 import json
 import math
-import os
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PUBLIC_ROOT = HERE.parent
-PARENT = PUBLIC_ROOT.parent
 UNIVERSE_FILE = PUBLIC_ROOT / "data" / "indicators_universe.json"
 OUT_FILE = PUBLIC_ROOT / "data" / "buy_levels.json"
 
@@ -65,62 +63,19 @@ MIN_SECTOR_PRICE = 100.0  # 業種平均ユニバースの最低終値（H84 ユ
 # 必要履歴: 60日安値 / σ60＋シフト5＋急落窓5 のうち長い方 + 余裕（休場ズレ）。
 INPUT_DAYS = max(LOW_WINDOW, VOL_WINDOW + VOL_SHIFT + CRASH_WINDOW) + 15
 
-_CANDIDATE_JQUANTS_REPOS = [
-    os.environ.get("JQUANTS_PARQUET_REPO", ""),
-    str(PARENT / "jquants-data"),
-]
+def load_sector_map() -> dict[str, str]:
+    """code4 → 33業種コード を返す（TBK-0009）。
 
-
-def _find_prices_dir() -> str | None:
-    for base in _CANDIDATE_JQUANTS_REPOS:
-        if not base:
-            continue
-        p = Path(base) / "prices"
-        if p.is_dir():
-            return str(p.resolve())
-    return None
-
-
-def _find_full_dir() -> str | None:
-    """jquants-data の full/（sector33_*.parquet 群）を探す。連れ安度の業種マップ用。"""
-    for base in _CANDIDATE_JQUANTS_REPOS:
-        if not base:
-            continue
-        p = Path(base) / "full"
-        if p.is_dir() and any(p.glob("sector33_*.parquet")):
-            return str(p.resolve())
-    return None
-
-
-def load_sector_map(full_dir: str | None) -> dict[str, str]:
-    """code4 → 33業種コード(S33) を full/sector33_<S33>_full.parquet から作る（TBK-0009）。
-
-    ファイル名の S33 を業種コード、各ファイルの `code` 列を構成銘柄とする（gen_stocks.py と同方式）。
-    pyarrow が無い・full/ が無い場合は空 dict を返す（連れ安度は無効化＝劣化動作）。
+    入力源は datasource 層で切替（local=full/sector33_*.parquet のファイル名方式 /
+    r2=dim_listed.sector33。TBK-0013）。取得不能時は空 dict（連れ安度は無効化＝劣化動作）。
     """
-    if not full_dir:
-        return {}
-    try:
-        import pyarrow.parquet as pq  # type: ignore
-    except ImportError:
-        print("  注意: pyarrow が無いため連れ安度（業種マップ）をスキップします。", file=sys.stderr)
-        return {}
+    import datasource
 
-    mapping: dict[str, str] = {}
-    pat = re.compile(r"sector33_([0-9A-Za-z]+)_full\.parquet$")
-    for path in sorted(glob.glob(os.path.join(full_dir, "sector33_*.parquet"))):
-        m = pat.search(os.path.basename(path))
-        if not m:
-            continue
-        s33 = m.group(1)
-        codes = pq.read_table(path, columns=["code"]).column("code").to_pylist()
-        for code in codes:
-            if code is None:
-                continue
-            c4 = str(code)[:4]
-            if re.fullmatch(r"[0-9][0-9A-Z]{3}", c4):
-                mapping.setdefault(c4, s33)
-    return mapping
+    try:
+        return datasource.load_sector33_map()
+    except Exception as e:
+        print(f"  注意: 業種マップの取得に失敗したため連れ安度をスキップします: {e}", file=sys.stderr)
+        return {}
 
 
 def load_universe() -> list[str]:
@@ -137,50 +92,36 @@ def load_universe() -> list[str]:
     return out
 
 
-def _daily_price_files(prices_dir: str, last_n: int) -> list[str]:
-    """prices_YYYYMMDD.parquet を日付順で直近 last_n 件返す（latest/stats/split は除外）。"""
-    files = []
-    for path in glob.glob(os.path.join(prices_dir, "prices_*.parquet")):
-        digits = os.path.basename(path).replace("prices_", "").replace(".parquet", "")
-        if digits.isdigit():
-            files.append(path)
-    files.sort()
-    return files[-last_n:] if last_n else files
+def _load_panel(universe: set[str]):
+    """監視リスト銘柄の日次株価を結合した長形式 DataFrame を返す（code4, date, adj_close）。
 
-
-def _load_panel(prices_dir: str, universe: set[str]):
-    """監視リスト銘柄の日次株価を結合した長形式 DataFrame を返す（code4, date, adj_close）。"""
+    入力源は datasource 層で切替（local=jquants-data / r2=QDP silver。TBK-0013）。
+    """
+    import datasource
     import pandas as pd
 
-    files = _daily_price_files(prices_dir, INPUT_DAYS)
-    if not files:
-        raise FileNotFoundError(f"price parquet が見つかりません: {prices_dir}")
-
-    frames = []
-    for path in files:
-        df = pd.read_parquet(path, columns=["code", "date", "adj_close"])
-        df["code4"] = df["code"].astype(str).str[:4]
-        df = df[df["code4"].isin(universe)]
-        if not df.empty:
-            frames.append(df)
-    if not frames:
+    df = datasource.load_price_panel(INPUT_DAYS, ["adj_close"], codes4=universe)
+    if df.empty:
         return pd.DataFrame(columns=["code4", "date", "adj_close"])
-    return pd.concat(frames, ignore_index=True)
+    df = df.copy()
+    df["code4"] = df["code"].astype(str).str[:4]
+    return df[["code4", "date", "adj_close"]]
 
 
-def _load_full_closes(prices_dir: str, last_n: int) -> dict[str, list[float]]:
+def _load_full_closes(last_n: int) -> dict[str, list[float]]:
     """全上場銘柄の直近 last_n 日の調整後終値を code4 → [古→新] で返す（業種平均の母集団用）。"""
+    import datasource
     import pandas as pd
 
-    files = _daily_price_files(prices_dir, last_n)
-    if not files:
+    try:
+        panel = datasource.load_price_panel(last_n, ["adj_close"])
+    except FileNotFoundError:
         return {}
-    frames = []
-    for path in files:
-        df = pd.read_parquet(path, columns=["code", "date", "adj_close"])
-        df["code4"] = df["code"].astype(str).str[:4]
-        frames.append(df[["code4", "date", "adj_close"]])
-    panel = pd.concat(frames, ignore_index=True)
+    if panel.empty:
+        return {}
+    panel = panel.copy()
+    panel["code4"] = panel["code"].astype(str).str[:4]
+    panel = panel[["code4", "date", "adj_close"]]
     panel["date"] = pd.to_datetime(panel["date"])
     panel["adj_close"] = pd.to_numeric(panel["adj_close"], errors="coerce")
     panel = panel.dropna(subset=["adj_close"]).sort_values(["code4", "date"])
@@ -307,7 +248,10 @@ def _level(level_id: str, label: str, price: float, close: float) -> dict:
 
 
 def compute_board(
-    panel, sector_map: dict[str, str] | None = None, sector_means: dict[str, float] | None = None
+    panel,
+    sector_map: dict[str, str] | None = None,
+    sector_means: dict[str, float] | None = None,
+    source: str = "jquants-data prices",
 ) -> dict:
     """長形式の株価 DataFrame から buy_levels.json の payload を計算する純粋関数（テスト対象）。
 
@@ -366,15 +310,16 @@ def compute_board(
         return {}
     return {
         "updated": updated,
-        "source": "jquants-data prices (調整後終値ベース)",
+        "source": f"{source} (調整後終値ベース)",
         "near_threshold": NEAR_THRESHOLD,
         "stocks": stocks,
     }
 
 
 def main() -> int:
-    prices_dir = _find_prices_dir()
-    if not prices_dir:
+    import datasource
+
+    if not datasource.use_r2() and not datasource.find_prices_dir():
         print(
             "jquants-data の prices/ が見つかりません。環境変数 JQUANTS_PARQUET_REPO で指定してください。",
             file=sys.stderr,
@@ -386,19 +331,21 @@ def main() -> int:
         print("監視リスト（data/indicators_universe.json の codes）が空です。対象銘柄を追加してください。")
         return 0
 
-    panel = _load_panel(prices_dir, set(universe))
+    panel = _load_panel(set(universe))
 
     # 連れ安度（TBK-0009）: 全上場の直近終値から業種平均5日下落率を作る。
-    # full/（業種マップ）や全上場パネルが無ければ連れ安度はスキップ（劣化動作）。
-    sector_map = load_sector_map(_find_full_dir())
+    # 業種マップや全上場パネルが無ければ連れ安度はスキップ（劣化動作）。
+    sector_map = load_sector_map()
     sector_means: dict[str, float] = {}
     if sector_map:
-        full_closes = _load_full_closes(prices_dir, CRASH_WINDOW + 1)
+        full_closes = _load_full_closes(CRASH_WINDOW + 1)
         sector_means = compute_sector_means(full_closes, sector_map)
     else:
         print("  注意: 業種マップが無いため連れ安度を付与しません。", file=sys.stderr)
 
-    payload = compute_board(panel, sector_map=sector_map, sector_means=sector_means)
+    payload = compute_board(
+        panel, sector_map=sector_map, sector_means=sector_means, source=datasource.source_label()
+    )
     if not payload:
         print("計算可能な銘柄がありません（履歴不足の可能性）。", file=sys.stderr)
         return 1

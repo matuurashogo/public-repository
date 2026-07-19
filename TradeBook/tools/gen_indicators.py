@@ -16,6 +16,7 @@
 全約3,800銘柄を毎日コミットすると git 履歴が肥大化するため、対象は監視リスト方式で限定する
 （ADR: エントリー・スナップショットのデータ契約を参照）。
 
+入力は datasource 層（TBK-0013）経由。TRADEBOOK_DATA_SOURCE=r2 で QDP R2 から読める。
 jquants-data の場所は次の優先順で自動検出する（環境変数 JQUANTS_PARQUET_REPO で明示可）:
   1. 環境変数 JQUANTS_PARQUET_REPO
   2. 兄弟ディレクトリ ../jquants-data
@@ -35,16 +36,13 @@ jquants-data の場所は次の優先順で自動検出する（環境変数 JQU
 
 from __future__ import annotations
 
-import glob
 import json
-import os
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PUBLIC_ROOT = HERE.parent
-PARENT = PUBLIC_ROOT.parent
 UNIVERSE_FILE = PUBLIC_ROOT / "data" / "indicators_universe.json"
 OUT_DIR = PUBLIC_ROOT / "data" / "indicators"
 
@@ -74,22 +72,6 @@ def _rsi(close, period: int = RSI_PERIOD):
     rsi = 100.0 - 100.0 / (1.0 + rs)
     return rsi.where(avg_loss != 0.0, 100.0)  # 下げ無し区間は RSI=100
 
-_CANDIDATE_JQUANTS_REPOS = [
-    os.environ.get("JQUANTS_PARQUET_REPO", ""),
-    str(PARENT / "jquants-data"),
-]
-
-
-def _find_prices_dir() -> str | None:
-    for base in _CANDIDATE_JQUANTS_REPOS:
-        if not base:
-            continue
-        p = Path(base) / "prices"
-        if p.is_dir():
-            return str(p.resolve())
-    return None
-
-
 def to_code4(code: str) -> str:
     """J-Quants の5桁ローカルコード（例 "72030"）→ 4桁証券コード（"7203"）。"""
     return str(code)[:4]
@@ -109,40 +91,23 @@ def load_universe() -> list[str]:
     return out
 
 
-def _daily_price_files(prices_dir: str, last_n: int) -> list[str]:
-    """prices_YYYYMMDD.parquet を日付順で直近 last_n 件返す（latest/stats/split は除外）。"""
-    files = []
-    for path in glob.glob(os.path.join(prices_dir, "prices_*.parquet")):
-        digits = os.path.basename(path).replace("prices_", "").replace(".parquet", "")
-        if digits.isdigit():
-            files.append(path)
-    files.sort()
-    return files[-last_n:] if last_n else files
+def _load_panel(universe: set[str]):
+    """監視リスト銘柄の日次株価を結合した長形式 DataFrame を返す（code4, date, adj_close, trading_value）。
 
-
-def _load_panel(prices_dir: str, universe: set[str]):
-    """監視リスト銘柄の日次株価を結合した長形式 DataFrame を返す（code4, date, adj_close, trading_value）。"""
+    入力源は datasource 層で切替（local=jquants-data / r2=QDP silver。TBK-0013）。
+    """
+    import datasource
     import pandas as pd
 
-    files = _daily_price_files(prices_dir, INPUT_DAYS)
-    if not files:
-        raise FileNotFoundError(f"price parquet が見つかりません: {prices_dir}")
-
-    frames = []
-    for path in files:
-        df = pd.read_parquet(path, columns=["code", "date", "adj_close", "trading_value"])
-        df["code4"] = df["code"].astype(str).str[:4]
-        df = df[df["code4"].isin(universe)]
-        if not df.empty:
-            frames.append(df)
-    if not frames:
-        import pandas as pd  # noqa: F811
-
+    df = datasource.load_price_panel(INPUT_DAYS, ["adj_close", "trading_value"], codes4=universe)
+    if df.empty:
         return pd.DataFrame(columns=["code4", "date", "adj_close", "trading_value"])
-    return pd.concat(frames, ignore_index=True)
+    df = df.copy()
+    df["code4"] = df["code"].astype(str).str[:4]
+    return df[["code4", "date", "adj_close", "trading_value"]]
 
 
-def compute_payloads(panel) -> dict:
+def compute_payloads(panel, source: str = "jquants-data prices") -> dict:
     """長形式の株価 DataFrame から code4 -> payload(dict) を計算する純粋関数（テスト対象）。"""
     import numpy as np
     import pandas as pd
@@ -193,15 +158,16 @@ def compute_payloads(panel) -> dict:
         out[code4] = {
             "code": code4,
             "updated": rows[-1]["d"],
-            "source": "jquants-data prices (VolDipSignals指標と同一定義)",
+            "source": f"{source} (VolDipSignals指標と同一定義)",
             "rows": rows,
         }
     return out
 
 
 def main() -> int:
-    prices_dir = _find_prices_dir()
-    if not prices_dir:
+    import datasource
+
+    if not datasource.use_r2() and not datasource.find_prices_dir():
         print(
             "jquants-data の prices/ が見つかりません。環境変数 JQUANTS_PARQUET_REPO で指定してください。",
             file=sys.stderr,
@@ -213,8 +179,8 @@ def main() -> int:
         print("監視リスト（data/indicators_universe.json の codes）が空です。対象銘柄を追加してください。")
         return 0
 
-    panel = _load_panel(prices_dir, set(universe))
-    payloads = compute_payloads(panel)
+    panel = _load_panel(set(universe))
+    payloads = compute_payloads(panel, source=datasource.source_label())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     written = 0
