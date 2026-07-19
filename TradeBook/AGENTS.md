@@ -30,6 +30,7 @@
 | エントリー指標 | `data/indicators/<code>.json` | 型別成績の客観軸。監視リスト方式（`data/indicators_universe.json`） |
 | 買いレベル | `data/buy_levels.json` | 買い時ボード（TBK-0006）。日次生成 |
 | ボラティリティ | `data/volatility.json` | 利確目標（TBK-0010） |
+| 支持線・抵抗線 | `data/sr_levels.json` | 保有カード・買い時ボードの S/R 表示（TBK-0014）。**生成は r2 必須**（adj_high/adj_low） |
 | 場中価格 | orphan ブランチ `intraday` の `data/intraday_prices.json` | 表示専用（TBK-0008・約20分遅延）。`js/intraday.js` が raw URL で取得 |
 | 銘柄名 | `data/stocks.json` | コード→銘柄名。生成は private の JQuantsExtractor 依存（この公開リポ単体では再生成不可） |
 
@@ -62,6 +63,7 @@ python tools/gen_stocks.py        # 銘柄名マスター（private データ依
 
 # R2（QDP silver）から生成する場合（TBK-0013。要 R2_* 環境変数・duckdb）
 TRADEBOOK_DATA_SOURCE=r2 python tools/gen_prices.py
+TRADEBOOK_DATA_SOURCE=r2 python tools/gen_sr_levels.py  # 支持線・抵抗線（TBK-0014・r2 必須）
 python tools/eval_datasource_parity.py --days 30   # local/r2 突合の Code-grader
 ```
 
@@ -79,6 +81,7 @@ python tools/test_gen_indicators.py
 python tools/test_gen_buy_levels.py
 python tools/test_gen_volatility.py
 python tools/test_datasource.py
+python tools/test_gen_sr_levels.py
 ```
 
 ## ⚠️ 既知のミスパターン

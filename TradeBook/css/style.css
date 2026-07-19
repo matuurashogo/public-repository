@@ -173,6 +173,13 @@ td.muted { color: #b0b0b5; }
 .h-tp-dist, .h-tp-hit { display: block; font-weight: 600; }
 .h-tp-target { display: block; color: #8a8a8e; font-size: 11px; }
 
+/* 支持線・抵抗線（TBK-0014）: 保有カードは R（抵抗・上）/ S（支持・下）の2段 */
+.h-sr { white-space: nowrap; line-height: 1.25; font-size: 12px; }
+.h-sr-res, .h-sr-sup { display: block; }
+.h-sr-res { color: #b3261e; }
+.h-sr-sup { color: #1e8e4a; }
+.h-sr-dist { color: #8a8a8e; font-size: 10px; }
+
 /* グラフ */
 .chart-wrap { position: relative; height: 180px; }
 .hist-wrap { height: 150px; }
@@ -369,6 +376,9 @@ td.muted { color: #b0b0b5; }
 .bl-hit .bl-dist { color: #1e8e4a; font-weight: 700; }
 .bl-near { background: #fdf3dc; border-radius: 8px; }
 .bl-near .bl-dist { color: #8a5a00; font-weight: 700; }
+/* 支持線・抵抗線（TBK-0014）: ボードは価格＋距離の2段セル（Lレベルと同型） */
+.bl-sr-sup .bl-price { color: #1e8e4a; }
+.bl-sr-res .bl-price { color: #b3261e; }
 
 /* 連れ安度バッジ（TBK-0009）: 急落イベント銘柄のみ。連れ安=買える押し目 / 個別急落=見送り。 */
 .bl-tsure { display: inline-block; margin-left: 4px; font-size: 9.5px; font-weight: 700;
