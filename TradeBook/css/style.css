@@ -408,3 +408,46 @@ main, body { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
 /* 場中価格の表示マーク（TBK-0008・表示専用） */
 .bl-live { font-size: 9px; color: #0a64d6; background: #e9f0ff; border-radius: 4px;
   padding: 1px 4px; margin-left: 4px; vertical-align: middle; font-weight: 700; }
+
+/* ---------- 銘柄詳細モーダル（TBK 詳細モーダル） ---------- */
+/* 行タップで出る「詳細を見る」アクション行 */
+.tappable-row { cursor: pointer; }
+.tappable-row.row-active { background: #eef4ff; }
+tr.row-detail-action td { padding: 6px 8px 10px; background: #eef4ff; }
+.row-detail-btn { display: block; width: 100%; padding: 10px; font-size: 13px; font-weight: 700;
+  color: #0a5bd6; background: #dfeaff; border: 1px solid #c3d8fb; border-radius: 10px; cursor: pointer; }
+.row-detail-btn:active { background: #cfe0ff; }
+
+body.modal-open { overflow: hidden; }
+.detail-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: flex-end;
+  justify-content: center; }
+.detail-modal[hidden] { display: none; }
+.detail-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.4); }
+.detail-sheet { position: relative; width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto;
+  background: #fff; border-radius: 16px 16px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.18); animation: detail-up 0.22s ease-out; }
+@keyframes detail-up { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .detail-sheet { animation: none; } }
+@media (min-width: 600px) { .detail-modal { align-items: center; } .detail-sheet { border-radius: 16px; } }
+
+.detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.detail-heading { display: flex; flex-direction: column; min-width: 0; }
+.detail-name { font-size: 18px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-code { font-size: 12px; color: #8a8a8e; }
+.detail-close { flex: none; width: 34px; height: 34px; border: 0; background: #f0f0f2; border-radius: 50%;
+  font-size: 20px; line-height: 1; color: #5a5a5e; cursor: pointer; }
+.detail-price { margin: 6px 0 10px; }
+.detail-px-val { font-size: 22px; font-weight: 700; }
+.detail-px-lbl { font-size: 11px; color: #8a8a8e; margin-left: 6px; }
+.detail-chart-wrap { position: relative; height: 220px; margin-bottom: 6px; }
+.detail-chart-note { font-size: 12px; color: #8a8a8e; margin: 4px 0 8px; }
+
+.detail-sections { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 6px; }
+@media (min-width: 460px) { .detail-sections { grid-template-columns: 1fr 1fr; } }
+.detail-block { border: 1px solid #ececef; border-radius: 12px; padding: 10px 12px; }
+.detail-block-title { font-size: 12px; font-weight: 700; color: #6a6a6e; margin-bottom: 6px; }
+.d-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  font-size: 13px; padding: 2px 0; }
+.d-row span { color: #5a5a5e; }
+.d-row b { font-weight: 600; text-align: right; }
+.d-row small { font-size: 11px; color: #8a8a8e; font-weight: 500; }

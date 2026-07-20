@@ -213,6 +213,24 @@
     <p id="empty-note" class="empty-note">まだ取引がありません。右下の「＋」ボタンから記録を始めましょう。</p>
   </section>
 
+  <!-- 銘柄詳細モーダル（TBK 詳細モーダル）: 買いボード・保有カードの行タップ→詳細ボタンで開く -->
+  <div id="detail-modal" class="detail-modal" hidden role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <div class="detail-overlay" data-detail-close></div>
+    <div class="detail-sheet" role="document">
+      <div class="detail-head">
+        <div class="detail-heading">
+          <span class="detail-name" id="detail-title"></span>
+          <span class="detail-code" id="detail-code"></span>
+        </div>
+        <button type="button" class="detail-close" data-detail-close aria-label="閉じる">×</button>
+      </div>
+      <div class="detail-price" id="detail-price"></div>
+      <div class="detail-chart-wrap"><canvas id="detail-chart" role="img" aria-label="終値と支持線・抵抗線のチャート"></canvas></div>
+      <p class="detail-chart-note" id="detail-chart-note" hidden></p>
+      <div class="detail-sections" id="detail-sections"></div>
+    </div>
+  </div>
+
   <!-- Chart.js（同梱・オフライン可） -->
   <script src="./js/vendor/chart.umd.min.js"></script>
   <!-- Google Identity Services -->

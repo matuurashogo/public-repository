@@ -13,9 +13,10 @@ import { loadStocks, codeToName, searchStocks } from "./stocks.js";
 import { parseTradeText, normalizeOcrText } from "./parse.js";
 import { loadPrices, getPriceMap, getPriceDate } from "./prices.js";
 import { calcRealized, aggregate, calcKpis, withMatsuiFees, calcUnrealized, tagBreakdown, entryTagAttribution, summarize, accountMixWarnings } from "./pnl.js";
-import { prefetchIndicators, getSnapshot, bucketOf, indicatorStatus, latestIndicatorDate, isEntryDataReady, getRows, computeEntryOutcome } from "./indicators.js";
+import { prefetchIndicators, loadIndicator, getSnapshot, bucketOf, indicatorStatus, latestIndicatorDate, isEntryDataReady, getRows, computeEntryOutcome } from "./indicators.js";
 import { MATSUI_BOX_RATE } from "./config.js";
-import { renderCumulative, renderHistogram } from "./charts.js";
+import { renderCumulative, renderHistogram, renderStockChart } from "./charts.js";
+import { buildChartModel, buildDetailSections } from "./detail.js";
 import { loadBuyLevels, renderBuyLevels, getBuyLevels } from "./buylevels.js";
 import { loadIntradayPrices, freshIntraday } from "./intraday.js";
 import { loadVolatility, getVolatility, paramsFromPayload, computeSellTarget } from "./selltarget.js";
@@ -411,6 +412,168 @@ function srCell(code, currentPrice, yen) {
   return `<td class="h-sr">${res}${sup}</td>`;
 }
 
+// ---------- 銘柄詳細モーダル（TBK 詳細モーダル） ----------
+
+// 現在値を取得（場中が新鮮なら場中・無ければ終値）。戻り値 { price, isIntraday }。
+function currentPriceOf(code) {
+  const intraday = freshIntraday();
+  const iv = intraday && intraday.prices ? Number(intraday.prices[String(code)]) : NaN;
+  if (Number.isFinite(iv) && iv > 0) return { price: iv, isIntraday: true };
+  const cv = Number(getPriceMap()[String(code)]);
+  return { price: Number.isFinite(cv) && cv > 0 ? cv : null, isIntraday: false };
+}
+
+// その銘柄の保有情報（含み損益つき行）を返す。非保有は null。
+function holdingRowOf(code) {
+  const { holdings } = calcRealized(tradesForCalc());
+  const intraday = freshIntraday();
+  const priceMap = intraday ? { ...getPriceMap(), ...intraday.prices } : getPriceMap();
+  const { rows } = calcUnrealized(holdings, priceMap);
+  return rows.find((r) => String(r.code) === String(code)) || null;
+}
+
+// 詳細モーダルを開く。indicators は遅延取得（監視リスト外なら null＝チャートなし表示）。
+async function openStockDetail(code) {
+  code = String(code);
+  const modal = $("detail-modal");
+  if (!modal) return;
+
+  // 先に骨組みを見せる（データ取得を待たせない）
+  $("detail-title").textContent = codeToName(code) || "（名称未登録）";
+  $("detail-code").textContent = code;
+  showDetailModal();
+
+  // 指標系列を遅延取得（監視リスト銘柄のみ存在。無ければ null）
+  await loadIndicator(code);
+  const rows = getRows(code);
+  const sr = srForCode(getSrLevels(), code);
+  const buyStock = (getBuyLevels()?.stocks || []).find((s) => String(s.code) === code) || null;
+  const vol = getVolatility();
+  const sigma = vol && vol.sigma ? vol.sigma[code] : undefined;
+  const { price, isIntraday } = currentPriceOf(code);
+  const holding = holdingRowOf(code);
+  const snapshot = rows && rows.length ? rows[rows.length - 1] : null;
+
+  // チャート（終値＋S/R横線）
+  const chartModel = buildChartModel(rows, sr);
+  const note = $("detail-chart-note");
+  if (chartModel.hasData) {
+    note.hidden = true;
+    renderStockChart($("detail-chart"), chartModel);
+  } else {
+    // 監視リスト外などデータ無し: キャンバスを消して注記を出す
+    renderStockChart($("detail-chart"), { hasData: false });
+    note.hidden = false;
+    note.textContent = "チャートデータがありません（監視リストに追加すると翌営業日から表示されます）。";
+  }
+
+  // 現在値
+  const priceEl = $("detail-price");
+  if (price != null) {
+    const label = isIntraday && freshIntraday() ? `${esc(freshIntraday().label)}時点` : "終値";
+    priceEl.innerHTML = `<span class="detail-px-val">${Math.round(price).toLocaleString("ja-JP")}</span><span class="detail-px-lbl">${label}</span>`;
+  } else {
+    priceEl.textContent = "現在値の取得不可";
+  }
+
+  // 情報セクション（純粋関数で view-model を組み、描画はここで）
+  const model = buildDetailSections({
+    code,
+    name: codeToName(code) || "",
+    currentPrice: price,
+    priceIsIntraday: isIntraday,
+    sr,
+    buyStock,
+    sigma: typeof sigma === "number" ? sigma : null,
+    volParams: paramsFromPayload(vol),
+    holding,
+    snapshot,
+  });
+  $("detail-sections").innerHTML = renderDetailSections(model);
+}
+
+// view-model → HTML（数値の整形のみ。計算は detail.js / selltarget.js 側で済み）。
+function renderDetailSections(m) {
+  const blocks = [];
+  const pct = (v) => (typeof v === "number" ? fmtSrDist(v) : "—");
+
+  // 含み損益（保有時）
+  if (m.holding) {
+    const h = m.holding;
+    const rate = h.unrealizedRate == null ? "" : ` (${formatPct(h.unrealizedRate)})`;
+    const val =
+      h.unrealized == null
+        ? '<span class="muted">現在値なし</span>'
+        : `<span class="${gainLossClass(h.unrealized)}">${formatYen(h.unrealized)}${rate}</span>`;
+    blocks.push(detailBlock("保有・含み損益", `
+      <div class="d-row"><span>保有数</span><b>${h.quantity.toLocaleString("ja-JP")}株</b></div>
+      <div class="d-row"><span>平均取得単価</span><b>${Math.round(h.avg).toLocaleString("ja-JP")}</b></div>
+      <div class="d-row"><span>含み損益</span><b>${val}</b></div>`));
+  }
+
+  // 支持線・抵抗線
+  if (m.sr) {
+    const line = (o, cls, mark) =>
+      `<div class="d-row"><span>${mark} ${Math.round(o.price).toLocaleString("ja-JP")}</span><b class="${cls}">${pct(o.dist)}</b></div>`;
+    const res = m.sr.resistance.map((o) => line(o, "loss", "抵抗")).join("");
+    const sup = m.sr.support.map((o) => line(o, "gain", "支持")).join("");
+    blocks.push(detailBlock("支持線・抵抗線", (res || "") + (sup || "") || '<div class="muted">水準なし</div>'));
+  }
+
+  // 利確目標（σ連動）
+  if (m.sellTarget) {
+    const t = m.sellTarget;
+    let body = `<div class="d-row"><span>σ20</span><b>${(t.sigma * 100).toFixed(1)}%</b></div>
+      <div class="d-row"><span>利確幅（目安）</span><b>${t.width == null ? "—" : formatPct(t.width)}</b></div>`;
+    if (t.target) {
+      const dist = t.target.dist == null ? "" : `（あと ${formatPct(t.target.dist)}）`;
+      const hit = t.target.hit ? '<span class="gain">🎯到達</span>' : "";
+      body += `<div class="d-row"><span>利確目標価格</span><b>${Math.round(t.target.targetPrice).toLocaleString("ja-JP")} ${hit}${dist}</b></div>`;
+    }
+    blocks.push(detailBlock("利確目標（ボラ連動）", body));
+  }
+
+  // 買いレベル L1〜L6
+  if (m.buyLevels && m.buyLevels.length) {
+    const rows = m.buyLevels
+      .map((lv) => {
+        const state = lv.hit ? '<span class="gain">到達</span>' : lv.dist == null ? "" : `あと ${(-lv.dist * 100).toFixed(1)}%`;
+        return `<div class="d-row"><span>${esc(lv.label)}</span><b>${Math.round(lv.price).toLocaleString("ja-JP")} <small>${state}</small></b></div>`;
+      })
+      .join("");
+    blocks.push(detailBlock("買いレベル", rows));
+  }
+
+  // 客観指標スナップショット
+  if (m.indicators) {
+    const i = m.indicators;
+    const fmt = (v, f) => (v == null ? "—" : f(v));
+    blocks.push(detailBlock(`客観指標${i.asOf ? `（${esc(i.asOf)}）` : ""}`, `
+      <div class="d-row"><span>25日線乖離</span><b>${fmt(i.dev, (v) => fmtSrDist(v))}</b></div>
+      <div class="d-row"><span>75日線</span><b>${i.abv == null ? "—" : i.abv ? "上（上昇基調）" : "下"}</b></div>
+      <div class="d-row"><span>出来高（20日平均比）</span><b>${fmt(i.vol, (v) => v.toFixed(2) + "倍")}</b></div>
+      <div class="d-row"><span>RSI(14)</span><b>${fmt(i.rsi, (v) => v.toFixed(1))}</b></div>
+      <div class="d-row"><span>年率ボラ(HV)</span><b>${fmt(i.hv, (v) => (v * 100).toFixed(1) + "%")}</b></div>`));
+  }
+
+  return blocks.join("") || '<p class="muted">この銘柄の詳細データはまだありません。</p>';
+}
+
+function detailBlock(title, innerHtml) {
+  return `<div class="detail-block"><div class="detail-block-title">${esc(title)}</div>${innerHtml}</div>`;
+}
+
+function showDetailModal() {
+  const modal = $("detail-modal");
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+}
+function closeDetailModal() {
+  const modal = $("detail-modal");
+  if (modal) modal.hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
 // 場中は intraday_prices.json（約20分遅延・表示専用・TBK-0008）が新鮮なら現在値を上書きする。
 function renderHoldings(holdings) {
   const intraday = freshIntraday();
@@ -457,8 +620,9 @@ function renderHoldings(holdings) {
         `<span class="h-code">${esc(r.code)}</span></td>`;
       const avg = yen(r.avg);
       const qty = `${r.quantity.toLocaleString("ja-JP")}株`;
+      const rowOpen = `<tr data-code="${esc(r.code)}" class="tappable-row">`;
       if (!hasPrices) {
-        return `<tr>${nameCell}<td>${qty}</td><td>${avg}</td></tr>`;
+        return `${rowOpen}${nameCell}<td>${qty}</td><td>${avg}</td></tr>`;
       }
       // 利確目標（TBK-0010）。取得単価とσ20から目標価格を合成（価格欠損行は現在値なしで目標のみ）。
       const tpCell = hasTp
@@ -470,12 +634,12 @@ function renderHoldings(holdings) {
       const pxCell =
         `<td class="h-px">${avg}<span class="h-arrow">→</span>${r.priced ? yen(r.price) : "—"}</td>`;
       if (!r.priced) {
-        return `<tr>${nameCell}<td>${qty}</td>${pxCell}<td class="muted">—</td>${tpCell}${srTd}</tr>`;
+        return `${rowOpen}${nameCell}<td>${qty}</td>${pxCell}<td class="muted">—</td>${tpCell}${srTd}</tr>`;
       }
       const rate =
         r.unrealizedRate === null ? "" : ` <span class="rate">(${formatPct(r.unrealizedRate)})</span>`;
       return (
-        `<tr>${nameCell}<td>${qty}</td>${pxCell}` +
+        `${rowOpen}${nameCell}<td>${qty}</td>${pxCell}` +
         `<td class="${gainLossClass(r.unrealized)}">${formatYen(r.unrealized)}${rate}</td>${tpCell}${srTd}</tr>`
       );
     })
@@ -1552,12 +1716,62 @@ function onSubmit(ev) {
 }
 
 // ---------- イベント結線 ----------
+// 買いボード・保有カードの行タップ→「詳細を見る」ボタン→モーダル（TBK 詳細モーダル）。
+// テーブル要素にデリゲートで1回だけ配線（tbody は再描画されるが table 自体は残る）。
+function wireDetailTaps() {
+  for (const tableId of ["buylevels-table", "holdings-table"]) {
+    const table = $(tableId);
+    if (!table) continue;
+    table.addEventListener("click", (e) => {
+      const btn = e.target.closest(".row-detail-btn");
+      if (btn) {
+        openStockDetail(btn.dataset.code);
+        return;
+      }
+      const tr = e.target.closest("tr[data-code]");
+      if (tr && table.contains(tr)) toggleRowDetailButton(tr);
+    });
+  }
+  // モーダルを閉じる（×・オーバーレイ・Esc）
+  const modal = $("detail-modal");
+  if (modal) {
+    modal.addEventListener("click", (e) => {
+      if (e.target.closest("[data-detail-close]")) closeDetailModal();
+    });
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && modal && !modal.hidden) closeDetailModal();
+  });
+}
+
+// タップした行の直後に「詳細を見る」アクション行をトグル表示する。
+function toggleRowDetailButton(tr) {
+  const tbody = tr.parentElement;
+  if (!tbody) return;
+  const code = tr.dataset.code;
+  const existing = tbody.querySelector("tr.row-detail-action");
+  const wasForThis = existing && existing.previousElementSibling === tr;
+  if (existing) existing.remove();
+  tr.classList.remove("row-active");
+  if (wasForThis) return; // 同じ行の再タップ → 閉じるだけ
+  tbody.querySelectorAll("tr.row-active").forEach((r) => r.classList.remove("row-active"));
+  const cols = tr.children.length;
+  const ar = document.createElement("tr");
+  ar.className = "row-detail-action";
+  ar.innerHTML =
+    `<td colspan="${cols}"><button type="button" class="row-detail-btn" data-code="${esc(code)}">` +
+    `${esc(codeToName(code) || code)} の詳細を見る 📊</button></td>`;
+  tr.after(ar);
+  tr.classList.add("row-active");
+}
+
 function wireEvents() {
   $("seg").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-axis]");
     if (btn) setAxis(btn.dataset.axis);
   });
   enableAxisSwipe();
+  wireDetailTaps();
 
   $("add-toggle").addEventListener("click", () => openForm(null));
   $("form-cancel").addEventListener("click", closeForm);
