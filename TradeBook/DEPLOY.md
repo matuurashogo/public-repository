@@ -83,3 +83,31 @@ VPS 経路のセットアップ（一度きり）:
 
 支持線・抵抗線（`data/sr_levels.json`・TBK-0014）は R2 の調整後四本値が必要なため、
 **VPS 経路でのみ生成される**（Actions の jquants-data 経路では生成されない）。
+
+## 場中価格の更新経路（intraday・TBK-0008）
+
+日次データとは別に、場中価格（約20分遅延・表示専用）を平日の場中に更新する系統がある。
+
+| 経路 | 実体 | ソース | 状態 |
+|---|---|---|---|
+| GitHub Actions | `.github/workflows/intraday-prices.yml` | Yahoo チャートAPI | 従来経路。VPS 安定後は `workflow_dispatch` の救済用 |
+| **VPS cron** | `scripts/vps_intraday_update.sh` | 同上 | 15分間隔で発火・スクリプトが場中セッションを自己判定 |
+
+> **なぜ VPS 向きか**: Yahoo チャートAPI は GitHub Actions の**共有IP**だとレート制限されやすい
+> （`fetch_intraday_prices.py` が yfinance ライブラリを避けたのと同じ理由）。VPS は**固定の専用IP**
+> なので相性が良い。データ契約・orphan ブランチ `intraday`・アプリ側の読み口（`js/intraday.js`）は不変。
+
+VPS 経路のセットアップ（一度きり）:
+
+1. 日次経路と同じクローン・認証を使う（`origin` に push できること）。追加の依存は不要
+   （`fetch_intraday_prices.py` は Python 標準ライブラリのみ）。
+2. cron に**15分間隔**で登録する（スクリプトが前場 09:00-11:30 / 後場 12:30-15:30 JST を
+   自己判定し、場外・昼休みは push せず終了する。cron の TZ に依存しない）:
+   ```
+   */15 0-6 * * 1-5  /opt/tradebook/public-repository/scripts/vps_intraday_update.sh >> /var/log/tradebook_intraday.log 2>&1
+   ```
+   （`0-6` UTC = `09-15` JST 台をカバー。場中セッションのみ実際に push される）
+   手動確認は `FORCE=1 scripts/vps_intraday_update.sh` で場外でも1回実行できる。
+3. 動作確認後、`intraday-prices.yml` の `schedule:` をコメントアウトして二重 push を止める
+   （`workflow_dispatch` は残す＝救済経路）。orphan ブランチへの force-push なので、移行期に
+   両系統が併走しても main の履歴は汚れない（last-writer-wins・無害）。
