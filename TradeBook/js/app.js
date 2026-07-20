@@ -19,6 +19,7 @@ import { renderCumulative, renderHistogram } from "./charts.js";
 import { loadBuyLevels, renderBuyLevels, getBuyLevels } from "./buylevels.js";
 import { loadIntradayPrices, freshIntraday } from "./intraday.js";
 import { loadVolatility, getVolatility, paramsFromPayload, computeSellTarget } from "./selltarget.js";
+import { loadSrLevels, getSrLevels, srForCode, nearestSr, fmtSrDist } from "./srlevels.js";
 
 const store = new Store();
 let axis = "month"; // year | month | code
@@ -395,6 +396,21 @@ function sellTargetCell(avgCost, currentPrice, sigma, params, yen) {
   return `<td class="h-tp" title="${esc(`目標幅 ${formatPct(t.width)}（σ連動）`)}">${main}${target}</td>`;
 }
 
+// 支持線・抵抗線セル（TBK-0014・表示専用）。現在値に最も近い抵抗線（上）と支持線（下）を
+// 2段で出す。currentPrice が水準を跨いでいれば nearestSr が振り分け直す。データ無しは「—」。
+function srCell(code, currentPrice, yen) {
+  const sr = srForCode(getSrLevels(), code);
+  const { support, resistance } = nearestSr(sr, currentPrice);
+  if (!support && !resistance) return `<td class="muted">—</td>`;
+  const res = resistance
+    ? `<span class="h-sr-res" title="抵抗線（上値の節目・スイング高値/安値）">R ${yen(resistance.price)} <span class="h-sr-dist">${fmtSrDist(resistance.dist)}</span></span>`
+    : `<span class="h-sr-res muted">R —</span>`;
+  const sup = support
+    ? `<span class="h-sr-sup" title="支持線（下値の節目・スイング高値/安値）">S ${yen(support.price)} <span class="h-sr-dist">${fmtSrDist(support.dist)}</span></span>`
+    : `<span class="h-sr-sup muted">S —</span>`;
+  return `<td class="h-sr">${res}${sup}</td>`;
+}
+
 // 場中は intraday_prices.json（約20分遅延・表示専用・TBK-0008）が新鮮なら現在値を上書きする。
 function renderHoldings(holdings) {
   const intraday = freshIntraday();
@@ -416,12 +432,16 @@ function renderHoldings(holdings) {
   const hasTp = hasPrices && Object.keys(sigmaMap).length > 0;
   const tpHead = hasTp ? "<th>利確目標</th>" : "";
 
+  // 支持線・抵抗線（TBK-0014）。sr_levels.json の配信がある時だけ列を出す（無ければ従来表示のまま）。
+  const hasSr = hasPrices && !!getSrLevels();
+  const srHead = hasSr ? "<th>支持/抵抗</th>" : "";
+
   thead.innerHTML = hasPrices
-    ? `<tr><th>銘柄</th><th>保有数</th><th>取得→現在</th><th>含み損益</th>${tpHead}</tr>`
+    ? `<tr><th>銘柄</th><th>保有数</th><th>取得→現在</th><th>含み損益</th>${tpHead}${srHead}</tr>`
     : `<tr><th>銘柄</th><th>保有数</th><th>平均取得単価</th></tr>`;
 
   if (rows.length === 0) {
-    const cols = hasPrices ? (hasTp ? 5 : 4) : 3;
+    const cols = hasPrices ? 4 + (hasTp ? 1 : 0) + (hasSr ? 1 : 0) : 3;
     tbody.innerHTML = `<tr><td colspan="${cols}" class="table-empty">保有中の銘柄はありません</td></tr>`;
     if (note) note.textContent = "";
     return;
@@ -444,17 +464,19 @@ function renderHoldings(holdings) {
       const tpCell = hasTp
         ? sellTargetCell(r.avg, r.priced ? r.price : null, sigmaMap[r.code], tpParams, yen)
         : "";
+      // 支持線・抵抗線（TBK-0014）。価格欠損行は配信時 close 基準で振り分ける。
+      const srTd = hasSr ? srCell(r.code, r.priced ? r.price : null, yen) : "";
       // 取得→現在（B案・圧縮）: 買値と現在値を1セルに。価格欠損行は現在側を「—」。
       const pxCell =
         `<td class="h-px">${avg}<span class="h-arrow">→</span>${r.priced ? yen(r.price) : "—"}</td>`;
       if (!r.priced) {
-        return `<tr>${nameCell}<td>${qty}</td>${pxCell}<td class="muted">—</td>${tpCell}</tr>`;
+        return `<tr>${nameCell}<td>${qty}</td>${pxCell}<td class="muted">—</td>${tpCell}${srTd}</tr>`;
       }
       const rate =
         r.unrealizedRate === null ? "" : ` <span class="rate">(${formatPct(r.unrealizedRate)})</span>`;
       return (
         `<tr>${nameCell}<td>${qty}</td>${pxCell}` +
-        `<td class="${gainLossClass(r.unrealized)}">${formatYen(r.unrealized)}${rate}</td>${tpCell}</tr>`
+        `<td class="${gainLossClass(r.unrealized)}">${formatYen(r.unrealized)}${rate}</td>${tpCell}${srTd}</tr>`
       );
     })
     .join("");
@@ -1707,7 +1729,7 @@ async function pollIntraday() {
   try {
     await loadIntradayPrices();
     renderAll();
-    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday());
+    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday(), getSrLevels());
   } catch (e) {
     console.warn("場中価格の定期更新に失敗:", e);
   }
@@ -1725,7 +1747,7 @@ async function refreshPricesOnForeground() {
     await Promise.all([loadPrices(), loadIntradayPrices()]);
     // 価格は renderHoldings 内で都度参照するため、再描画で反映される
     renderAll();
-    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday());
+    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday(), getSrLevels());
     if (before !== getPriceDate()) {
       console.info("最新株価を取得しました:", getPriceDate());
     }
@@ -1742,10 +1764,10 @@ async function init() {
   renderTagChips();
   renderAll();
   refreshIndicators(); // 客観スナップショットは取得でき次第あとから反映
-  // 買い時ボード（TBK-0006）と場中価格（TBK-0008）。取得でき次第あとから反映
-  Promise.all([loadBuyLevels(), loadIntradayPrices(), loadVolatility()]).then(() => {
-    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday());
-    renderAll(); // 場中価格と利確目標（TBK-0010）を保有カードに反映
+  // 買い時ボード（TBK-0006）と場中価格（TBK-0008）と支持線・抵抗線（TBK-0014）。取得でき次第あとから反映
+  Promise.all([loadBuyLevels(), loadIntradayPrices(), loadVolatility(), loadSrLevels()]).then(() => {
+    renderBuyLevels(getBuyLevels(), codeToName, freshIntraday(), getSrLevels());
+    renderAll(); // 場中価格・利確目標（TBK-0010）・支持線/抵抗線を保有カードに反映
   });
 
   if (!isConfigured()) {

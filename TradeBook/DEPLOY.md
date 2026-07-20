@@ -58,3 +58,28 @@ gh repo create tradebook --public --source=. --remote=origin --push
 
 本体リポジトリの `TradeBook/` を更新したら、その中身を公開リポへ反映してください
 （変更ファイルをコピーして `git add/commit/push`）。
+
+## 日次データ更新の経路（2系統）
+
+| 経路 | 実体 | データソース | 状態 |
+|---|---|---|---|
+| GitHub Actions | `.github/workflows/update-prices.yml` | jquants-data（PAT + sparse clone） | 従来経路。VPS 安定後は `workflow_dispatch` の救済用 |
+| **VPS cron** | `scripts/vps_daily_update.sh` | **QDP R2**（TBK-0013） | `qdp daily --publish` の後段に連結して実行 |
+
+VPS 経路のセットアップ（一度きり）:
+
+1. VPS に public-repository をクローンし、push 可能な認証（Fine-grained PAT の
+   `origin` URL 埋め込み or デプロイキー）を設定する。
+2. R2 資格情報は qdp と同じ `.env`（既定 `/opt/qdp/secrets/.env`）を read-only で共用する
+   （`TRADEBOOK_ENV_FILE` で変更可）。実値のコミットは禁止（GLOB-0005）。
+3. `pip install pandas pyarrow duckdb`（＋監視リスト同期を使うなら google-api-python-client / google-auth）。
+4. cron に qdp の後段として登録する:
+   ```
+   45 20 * * 1-5  /opt/qdp/quant-data-platform/scripts/qdp_daily.sh && \
+                  /opt/tradebook/public-repository/scripts/vps_daily_update.sh >> /var/log/tradebook_daily.log 2>&1
+   ```
+5. 動作確認後、update-prices.yml の `schedule:` をコメントアウトして二重更新を止める
+   （`workflow_dispatch` は残す＝VPS 障害時の救済経路）。
+
+支持線・抵抗線（`data/sr_levels.json`・TBK-0014）は R2 の調整後四本値が必要なため、
+**VPS 経路でのみ生成される**（Actions の jquants-data 経路では生成されない）。

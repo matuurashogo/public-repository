@@ -199,16 +199,49 @@ def resolve_source(arg: str | None) -> tuple[str, str]:
     )
 
 
+def supplement_with_r2(mapping: dict[str, str]) -> int:
+    """QDP R2 の dim_listed（company_name）から未収録コードの社名のみを補完する（TBK-0013）。
+
+    既存の名前は上書きしない（追加のみ）。追加件数を返す。
+    """
+    import datasource
+
+    added = 0
+    for code4, name in datasource.load_company_names().items():
+        if code4 not in mapping:
+            mapping[code4] = name
+            added += 1
+    if added:
+        print(f"  qdp-r2 dim_listed から {added} 銘柄の名前を補完しました。")
+    return added
+
+
 def main() -> None:
+    import datasource
+
     arg = sys.argv[1] if len(sys.argv) > 1 else None
-    src, kind = resolve_source(arg)
-    if not os.path.exists(src):
-        raise SystemExit(f"入力が見つかりません: {src}")
+    src = None
+    kind = ""
+    try:
+        src, kind = resolve_source(arg)
+    except SystemExit:
+        # R2（TRADEBOOK_DATA_SOURCE=r2）なら私有マスター無しでも dim_listed 単独で生成できる
+        if not datasource.use_r2():
+            raise
 
-    mapping = from_equity_master(src) if kind == "equity" else from_subsector_master(src)
+    mapping: dict[str, str] = {}
+    if src:
+        if not os.path.exists(src):
+            raise SystemExit(f"入力が見つかりません: {src}")
+        mapping = from_equity_master(src) if kind == "equity" else from_subsector_master(src)
+        # jquants-data の財務データ（full/）で未収録銘柄の名前を補完（任意・あれば実施）
+        supplement_with_jquants(mapping)
 
-    # jquants-data の財務データ（full/）で未収録銘柄の名前を補完（任意・あれば実施）
-    supplement_with_jquants(mapping)
+    # QDP R2 の dim_listed で補完（r2 選択時のみ。私有マスター無しなら単独ソースになる）
+    if datasource.use_r2():
+        supplement_with_r2(mapping)
+    if not mapping:
+        raise SystemExit("銘柄名を1件も取得できませんでした（入力とデータソース設定を確認してください）。")
 
     ordered = dict(sorted(mapping.items()))
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
@@ -216,8 +249,11 @@ def main() -> None:
         json.dump(ordered, f, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         f.write("\n")
 
-    label = "全銘柄マスター" if kind == "equity" else "セクター分類データ（一部銘柄）"
-    print(f"生成完了: {OUT}（{len(ordered)}銘柄）／ 入力: {os.path.basename(src)} = {label}")
+    if src:
+        label = "全銘柄マスター" if kind == "equity" else "セクター分類データ（一部銘柄）"
+        print(f"生成完了: {OUT}（{len(ordered)}銘柄）／ 入力: {os.path.basename(src)} = {label}")
+    else:
+        print(f"生成完了: {OUT}（{len(ordered)}銘柄）／ 入力: qdp-r2 dim_listed")
 
 
 if __name__ == "__main__":

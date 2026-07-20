@@ -3,7 +3,25 @@
 // データの正は jquants-data（GitHub Actions が tools/gen_buy_levels.py で日次生成して同梱）。
 // 本モジュールは JSON を表示するだけで、レベルの再計算はしない（契約は TBK-0006）。
 
+import { srForCode, nearestSr, fmtSrDist } from "./srlevels.js";
+
 let _payload = null;
+
+// 支持線・抵抗線セル2つ分の HTML（TBK-0014・表示専用）。データ無しは「—」。
+function srCells(sr, code, close) {
+  const s = srForCode(sr, code);
+  const { support, resistance } = nearestSr(s, close);
+  const cell = (lv, cls, title) =>
+    lv
+      ? `<td class="bl-cell bl-sr ${cls}" title="${title}">` +
+        `<span class="bl-price">${Number(lv.price).toLocaleString()}</span>` +
+        `<span class="bl-dist">${fmtSrDist(lv.dist)}</span></td>`
+      : `<td class="muted">—</td>`;
+  return (
+    cell(support, "bl-sr-sup", "支持線（下値の節目・スイング水準）") +
+    cell(resistance, "bl-sr-res", "抵抗線（上値の節目・スイング水準）")
+  );
+}
 
 export async function loadBuyLevels() {
   try {
@@ -101,7 +119,7 @@ export function buildBoard(payload) {
 // ボードを #buylevels-table へ描画する。データが無ければカードを隠したまま何もしない。
 // intraday（{prices, label} | null・TBK-0008）が渡されたら現在値の「表示だけ」場中価格に
 // 差し替える。🟢/🟡（hit/near）の判定は終値ベースのまま変えない。
-export function renderBuyLevels(payload, codeToName, intraday = null) {
+export function renderBuyLevels(payload, codeToName, intraday = null, sr = null) {
   const card = document.getElementById("buylevels-card");
   const table = document.getElementById("buylevels-table");
   const dateEl = document.getElementById("buylevels-date");
@@ -136,9 +154,14 @@ export function renderBuyLevels(payload, codeToName, intraday = null) {
   thead.innerHTML = "";
   tbody.innerHTML = "";
 
+  // 支持線・抵抗線（TBK-0014）。sr_levels.json の配信がある時だけ列を出す（無ければ従来表示のまま）。
+  const hasSr = !!(sr && Array.isArray(sr.stocks) && sr.stocks.length);
+  const srHead = hasSr ? `<th>支持線</th><th>抵抗線</th>` : "";
+
   const trh = document.createElement("tr");
   trh.innerHTML =
     `<th class="bl-name">銘柄</th><th>現在値</th>` +
+    srHead +
     levelDefs.map((d) => `<th>${d.label}</th>`).join("");
   thead.appendChild(trh);
 
@@ -161,6 +184,8 @@ export function renderBuyLevels(payload, codeToName, intraday = null) {
     const closeText = Number.isFinite(livePrice)
       ? livePrice.toLocaleString()
       : Number(r.close).toLocaleString();
+    // 支持線・抵抗線セル（TBK-0014）。判定は他レベルと同じく終値（r.close）基準。
+    const srTds = hasSr ? srCells(sr, r.code, Number(r.close)) : "";
     // confirmed は色バッジ、candidate は中立チップ（confirmed 優先・両立しない）
     const chip = tsureyasuBadge(r.tsureyasu) || tsureyasuCandidate(r.tsureyasu);
     const badgeHtml = chip
@@ -170,6 +195,7 @@ export function renderBuyLevels(payload, codeToName, intraday = null) {
     tr.innerHTML =
       `<td class="bl-name">${r.code}<span class="bl-stock-name">${name}</span>${badgeHtml}</td>` +
       `<td class="bl-close">${closeText}${r.rebound ? '<span class="bl-rebound" title="陽転（下げ止まり）">↗</span>' : ""}</td>` +
+      srTds +
       tds;
     tbody.appendChild(tr);
   }
