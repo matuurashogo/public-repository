@@ -67,18 +67,27 @@ jquants-data 経路には次の制約がある:
 
 ## 📊 Eval 定義（ティアA）
 
-- **対象 (Target)**      : datasource 層の local / r2 バックエンドの入力パリティ（＝出力 JSON の不変性）
-- **成功条件 (Success)**  : 同一時点のデータに対し、両バックエンドの正規化 DataFrame・
-  および gen ツール出力 JSON（`source` フィールド除く）が一致する
-- **Grader (採点器)**     : Code。`tools/eval_datasource_parity.py`（P1 日付集合 / P2 行カバレッジ /
-  P3 値一致 / P4 最新終値）＋ `tools/test_datasource.py`（fixture パリティ）
-- **合格閾値 (Threshold)** : P1/P4 完全一致・P2 カバレッジ ≥ 99.9%・P3 相対差 ≤ 1e-9 の不一致 0 行
-- **反例 (Negatives)**    : 分割銘柄で adj_close が経路間で異なる（正規化ミス）／ trading_value に
-  turnover_value 以外の列を対応させて桁が変わる／日付窓のズレで P1 が崩れるのに PASS する採点器
-- **状態 (State)**        : Running
+- **対象 (Target)**      : datasource 層の local / r2 バックエンドの入力パリティ（＝出力 JSON の同等性）
+- **成功条件 (Success)**  : 同一時点のデータに対し、(1) local の全 (code,date) キーを r2 が被覆
+  （**local ⊆ r2**。r2 のみの行＝ETF/REIT・新形式コード等の追加収録は許容）、(2) 共通キーで
+  trading_value / close が完全一致、(3) adj_close の不一致は**銘柄内で r2/local 比が一定**
+  （＝分割の遡及調整差。R2 が権威・QDP-0040。jquants-data の日別ファイルは凍結で stale）に限る
+- **Grader (採点器)**     : Code。`tools/eval_datasource_parity.py`（P1 日付集合 / P2 local⊆r2 被覆 /
+  P3 値一致＋遡及差判別 / P4 最新終値）＋ `tools/test_datasource.py`（fixture パリティ）
+- **合格閾値 (Threshold)** : P1 完全一致・P2/P4 被覆率 ≥ 99.9%・P3「遡及差で説明できない不一致」0 行
+- **反例 (Negatives)**    : trading_value に turnover_value 以外の列を対応させて桁が変わる／
+  adj_close の比が銘柄内で**一定でない**のに許容してしまう採点器／日付窓のズレで P1 が崩れるのに
+  PASS する採点器
+- **状態 (State)**        : **Shipped**（実 R2 測定 PASS）
   - 2026-07-19 サンドボックス実測（jquants-data 789営業日から構築した R2 ミラー形式スタブ vs local）:
-    P1〜P4 全 PASS（30日窓・126,271行・不一致0）。gen 4種の出力 JSON **22/22 ファイル一致**
-    （source 除く）。実 R2 バケットに対する測定は VPS/手元で本 grader を実行して追記すること。
+    P1〜P4 全 PASS（30日窓・126,271行・不一致0）。gen 4種の出力 JSON **22/22 ファイル一致**（source 除く）。
+  - 2026-07-20 **実 R2 バケット測定（Refine 後）**: P1〜P4 全 PASS。差分はすべて説明可能——
+    (a) r2 のみ 6,992 行（224 銘柄/日。ETF/REIT・新形式コード等 jquants-data 抽出対象外の追加収録）、
+    (b) adj_close 遡及差 34 銘柄 515 行（例: 1663 の 2026-06-29 1:2 分割 ×0.5、2237 の 1:50 併合 ×0.02。
+    R2 が過去へ遡及調整・local は凍結ファイルで stale＝**R2 が正**）。説明不能な不一致 0 行。
+  - 初回測定（Refine 前の完全一致意味論）は上記 (a)(b) を FAIL 扱いにしていたため、成功条件を
+    本節のとおり精緻化した（Run↔Refine）。**切替は劣化ではなく改善**: 分割跨ぎの指標（MA25 等）は
+    local では価格空間が不連続だったが、r2 では正しく連続する。
 
 ## 🔧 実行可能チェック（Enforcement）
 

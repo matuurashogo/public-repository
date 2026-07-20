@@ -95,6 +95,8 @@ python tools/test_gen_sr_levels.py
 - リポジトリ再配置により、ワークフローのパスは `TradeBook/tools/...`・`TradeBook/data/...` 基準。`tools/*.py` 自体は `__file__` で自己解決するため cwd 非依存。
 - `TRADEBOOK_DATA_SOURCE=r2` で gen を実行すると出力 JSON の `source` ラベルが変わる（値は同一・TBK-0013 で検証済み）。コミット前にどちらの経路で生成したかを意識すること。
 - R2 の CREATE SECRET SQL を例外・ログへ出さない（鍵漏洩。`datasource.py` は握り潰す実装になっている——変更時に壊さないこと）。
+- **jquants-data の日別ファイルは分割を遡及調整しない（stale adj）**。分割銘柄で local と r2 の adj_close が異なるのは **r2 が正**（QDP-0040 の権威遡及）。local 経路では分割跨ぎの MA 等が不連続になる既知の限界がある。
+- r2 は ETF/REIT・新形式コード等も収録するため latest_prices.json は local より銘柄数が多くなる（上位集合・無害）。
 
 ## 📝 ADR 参照
 
