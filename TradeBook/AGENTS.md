@@ -31,7 +31,7 @@
 | 買いレベル | `data/buy_levels.json` | 買い時ボード（TBK-0006）。日次生成 |
 | ボラティリティ | `data/volatility.json` | 利確目標（TBK-0010） |
 | 支持線・抵抗線 | `data/sr_levels.json` | 保有カード・買い時ボードの S/R 表示（TBK-0014）。**生成は r2 必須**（adj_high/adj_low） |
-| 場中価格 | orphan ブランチ `intraday` の `data/intraday_prices.json` | 表示専用（TBK-0008・約20分遅延）。`js/intraday.js` が raw URL で取得 |
+| 場中価格 | orphan ブランチ `intraday` の `data/intraday_prices.json` | 表示専用（TBK-0008・約20分遅延）。`js/intraday.js` が raw URL で取得。生成は Actions（`intraday-prices.yml`）/ VPS（`scripts/vps_intraday_update.sh`）の2経路（後者が本命・専用IP） |
 | 銘柄名 | `data/stocks.json` | コード→銘柄名。生成は private の JQuantsExtractor 依存（この公開リポ単体では再生成不可） |
 
 外部依存（jquants-data）は **read-only**。アプリは生成済み JSON を読むだけで、生成ロジックを持ち込まない。

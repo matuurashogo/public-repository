@@ -192,6 +192,8 @@ export function renderBuyLevels(payload, codeToName, intraday = null, sr = null)
       ? `<span class="bl-tsure ${chip.cls}" title="${chip.title}">${chip.text}</span>`
       : "";
     const tr = document.createElement("tr");
+    tr.dataset.code = r.code;
+    tr.className = "tappable-row";
     tr.innerHTML =
       `<td class="bl-name">${r.code}<span class="bl-stock-name">${name}</span>${badgeHtml}</td>` +
       `<td class="bl-close">${closeText}${r.rebound ? '<span class="bl-rebound" title="陽転（下げ止まり）">↗</span>' : ""}</td>` +

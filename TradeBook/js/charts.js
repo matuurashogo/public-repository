@@ -126,6 +126,80 @@ function formatYen(n) {
   return sign + Math.abs(n).toLocaleString("ja-JP") + "円";
 }
 
+let _stock = null;
+
+// 銘柄詳細モーダルの価格チャート（TBK 詳細モーダル）。終値の折れ線＋支持/抵抗の横線のみ。
+// model: detail.buildChartModel() の戻り値 { labels[], close[], srLines[{value,kind}], hasData }。
+// 横線は追加プラグインを使わず「全x点に定数yを持つ線データセット」で描く（Chart.js 標準機能のみ）。
+export function renderStockChart(canvas, model) {
+  if (typeof window === "undefined" || !window.Chart || !canvas) return;
+  if (_stock) {
+    _stock.destroy();
+    _stock = null;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!model || !model.hasData) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  const { GAIN, LOSS } = lossGainColors();
+  const n = model.labels.length;
+
+  const priceDataset = {
+    label: "終値",
+    data: model.close,
+    borderColor: "#2b6cb0",
+    backgroundColor: "rgba(43,108,176,0.08)",
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.15,
+    fill: true,
+    order: 2,
+  };
+
+  // 支持=緑 / 抵抗=赤 の水平線。凡例ラベルに価格を載せる（横線が何の水準か分かるように）。
+  const srDatasets = (model.srLines || []).map((l) => ({
+    label: `${l.kind === "support" ? "支持" : "抵抗"} ${Math.round(l.value).toLocaleString("ja-JP")}`,
+    data: new Array(n).fill(l.value),
+    borderColor: l.kind === "support" ? GAIN : LOSS,
+    borderWidth: 1,
+    borderDash: [5, 4],
+    pointRadius: 0,
+    fill: false,
+    order: 1,
+  }));
+
+  _stock = new window.Chart(ctx, {
+    type: "line",
+    data: { labels: model.labels, datasets: [priceDataset, ...srDatasets] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: reduceMotion() ? false : { duration: 500 },
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: srDatasets.length > 0,
+          position: "bottom",
+          labels: { boxWidth: 18, font: { size: 10 }, filter: (item) => item.text !== "終値" },
+        },
+        tooltip: {
+          callbacks: {
+            label: (c) => `${c.dataset.label}: ${Math.round(c.parsed.y).toLocaleString("ja-JP")}`,
+          },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 6, font: { size: 9 } } },
+        y: {
+          grid: { color: "#f0f0f2" },
+          ticks: { callback: (v) => Math.round(v).toLocaleString("ja-JP"), font: { size: 10 } },
+        },
+      },
+    },
+  });
+}
+
 // 千円/万円の見やすい短縮表記（ヒストグラムの軸ラベル用）
 function shortYen(n) {
   const a = Math.abs(n);
