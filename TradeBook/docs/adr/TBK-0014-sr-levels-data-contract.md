@@ -4,10 +4,10 @@
 
 | 項目 | 値 |
 |------|---|
-| **Status** | `Accepted` |
+| **Status** | `Superseded` |
 | **Date** | 2026-07-19 |
 | **Supersedes** | — |
-| **Superseded by** | — |
+| **Superseded by** | TBK-0015 |
 
 ## ❓ コンテキスト（背景と課題）
 

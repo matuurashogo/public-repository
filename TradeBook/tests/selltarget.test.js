@@ -71,3 +71,41 @@ test("computeSellTarget: 価格欠損でも目標価格は出し、dist=null/hit
   assert.equal(r.dist, null);
   assert.equal(r.hit, false);
 });
+
+// ---- 抵抗線連動 min 方式（TBK-0016） ----
+
+test("computeSellTarget: σ目標より近い抵抗線があればそちらを目標にする", () => {
+  // 取得1000・σ4%(幅10%) → σ目標1100。抵抗線1060が手前 → 目標1060（basis=resistance）
+  const r = computeSellTarget(1000, 1020, 0.04, PARAMS, [1060, 1200]);
+  assert.ok(Math.abs(r.targetPrice - 1060) < 1e-9);
+  assert.equal(r.basis, "resistance");
+  assert.ok(Math.abs(r.width - 0.1) < 1e-9); // σ幅の情報は保持
+});
+
+test("computeSellTarget: 抵抗線がσ目標より遠ければσ目標のまま", () => {
+  const r = computeSellTarget(1000, 1020, 0.04, PARAMS, [1200, 1300]);
+  assert.ok(Math.abs(r.targetPrice - 1100) < 1e-9);
+  assert.equal(r.basis, "sigma");
+});
+
+test("computeSellTarget: 取得単価以下の抵抗線は利確候補にしない", () => {
+  // 含み損時: 現在950・取得1000。抵抗線980は取得より下 → 無視してσ目標1100
+  const r = computeSellTarget(1000, 950, 0.04, PARAMS, [980]);
+  assert.ok(Math.abs(r.targetPrice - 1100) < 1e-9);
+  assert.equal(r.basis, "sigma");
+});
+
+test("computeSellTarget: 抵抗線省略・空・不正値は従来動作（後方互換）", () => {
+  const base = computeSellTarget(1000, 1050, 0.04, PARAMS);
+  assert.equal(base.basis, "sigma");
+  const empty = computeSellTarget(1000, 1050, 0.04, PARAMS, []);
+  assert.ok(Math.abs(empty.targetPrice - base.targetPrice) < 1e-12);
+  const junk = computeSellTarget(1000, 1050, 0.04, PARAMS, ["x", NaN, null]);
+  assert.ok(Math.abs(junk.targetPrice - base.targetPrice) < 1e-12);
+});
+
+test("computeSellTarget: 抵抗線目標に現在値が到達していれば hit", () => {
+  const r = computeSellTarget(1000, 1065, 0.04, PARAMS, [1060]);
+  assert.equal(r.basis, "resistance");
+  assert.equal(r.hit, true);
+});

@@ -384,8 +384,8 @@ function addTagPrompt(kind) {
 // 利確目標セル（ボラ連動・TBK-0010・表示専用）。σ20が無ければ「—」。
 // 主役は売り判断に効く「あと +X%」/「🎯到達」。目標価格は下に小さく添える。
 // title に「目標幅 +W%（σ連動）」を出す。
-function sellTargetCell(avgCost, currentPrice, sigma, params, yen) {
-  const t = computeSellTarget(avgCost, currentPrice, sigma, params);
+function sellTargetCell(avgCost, currentPrice, sigma, params, yen, resistances = null) {
+  const t = computeSellTarget(avgCost, currentPrice, sigma, params, resistances);
   if (!t) return `<td class="muted">—</td>`;
   let main = "";
   if (t.dist !== null) {
@@ -393,8 +393,13 @@ function sellTargetCell(avgCost, currentPrice, sigma, params, yen) {
       ? `<span class="h-tp-hit ${gainLossClass(1)}">🎯到達</span>`
       : `<span class="h-tp-dist">あと ${formatPct(t.dist)}</span>`;
   }
+  // 目標の根拠（TBK-0016）: 抵抗線が σ目標より手前にあればそちらが目標になる
+  const basisLabel = t.basis === "resistance" ? "抵抗線" : "σ連動";
   const target = `<span class="h-tp-target">目標 ${yen(t.targetPrice)}</span>`;
-  return `<td class="h-tp" title="${esc(`目標幅 ${formatPct(t.width)}（σ連動）`)}">${main}${target}</td>`;
+  const title = t.basis === "resistance"
+    ? `最寄り抵抗線を利確目標に採用（σ目標より手前。σ幅 ${formatPct(t.width)}）`
+    : `目標幅 ${formatPct(t.width)}（σ連動）`;
+  return `<td class="h-tp" title="${esc(title)}">${main}${target}<span class="h-tp-basis">${basisLabel}</span></td>`;
 }
 
 // 支持線・抵抗線セル（TBK-0014・表示専用）。現在値に最も近い抵抗線（上）と支持線（下）を
@@ -495,7 +500,6 @@ async function openStockDetail(code) {
 // view-model → HTML（数値の整形のみ。計算は detail.js / selltarget.js 側で済み）。
 function renderDetailSections(m) {
   const blocks = [];
-  const pct = (v) => (typeof v === "number" ? fmtSrDist(v) : "—");
 
   // 含み損益（保有時）
   if (m.holding) {
@@ -511,26 +515,31 @@ function renderDetailSections(m) {
       <div class="d-row"><span>含み損益</span><b>${val}</b></div>`));
   }
 
-  // 支持線・抵抗線
+  // 支持線・抵抗線（タッチ回数=その水準が意識された回数。距離%は出さない・TBK-0015）
   if (m.sr) {
+    const touchLabel = (n) =>
+      n > 0
+        ? `<small title="この水準の価格帯で取引された回数（多いほど市場に意識されている）">タッチ${n}回</small>`
+        : `<small class="muted" title="水準誕生後まだ試されていない">未検証</small>`;
     const line = (o, cls, mark) =>
-      `<div class="d-row"><span>${mark} ${Math.round(o.price).toLocaleString("ja-JP")}</span><b class="${cls}">${pct(o.dist)}</b></div>`;
+      `<div class="d-row"><span class="${cls}">${mark} ${Math.round(o.price).toLocaleString("ja-JP")}</span><b>${touchLabel(o.touches)}</b></div>`;
     const res = m.sr.resistance.map((o) => line(o, "loss", "抵抗")).join("");
     const sup = m.sr.support.map((o) => line(o, "gain", "支持")).join("");
     blocks.push(detailBlock("支持線・抵抗線", (res || "") + (sup || "") || '<div class="muted">水準なし</div>'));
   }
 
-  // 利確目標（σ連動）
+  // 利確目標（σ連動＋抵抗線連動 min・TBK-0016）
   if (m.sellTarget) {
     const t = m.sellTarget;
     let body = `<div class="d-row"><span>σ20</span><b>${(t.sigma * 100).toFixed(1)}%</b></div>
-      <div class="d-row"><span>利確幅（目安）</span><b>${t.width == null ? "—" : formatPct(t.width)}</b></div>`;
+      <div class="d-row"><span>σ利確幅（参考）</span><b>${t.width == null ? "—" : formatPct(t.width)}</b></div>`;
     if (t.target) {
+      const basis = t.target.basis === "resistance" ? "抵抗線" : "σ連動";
       const dist = t.target.dist == null ? "" : `（あと ${formatPct(t.target.dist)}）`;
       const hit = t.target.hit ? '<span class="gain">🎯到達</span>' : "";
-      body += `<div class="d-row"><span>利確目標価格</span><b>${Math.round(t.target.targetPrice).toLocaleString("ja-JP")} ${hit}${dist}</b></div>`;
+      body += `<div class="d-row"><span>利確目標価格</span><b>${Math.round(t.target.targetPrice).toLocaleString("ja-JP")} <small>${basis}</small> ${hit}${dist}</b></div>`;
     }
-    blocks.push(detailBlock("利確目標（ボラ連動）", body));
+    blocks.push(detailBlock("利確目標", body));
   }
 
   // 買いレベル L1〜L6
@@ -624,9 +633,13 @@ function renderHoldings(holdings) {
       if (!hasPrices) {
         return `${rowOpen}${nameCell}<td>${qty}</td><td>${avg}</td></tr>`;
       }
-      // 利確目標（TBK-0010）。取得単価とσ20から目標価格を合成（価格欠損行は現在値なしで目標のみ）。
+      // 利確目標（TBK-0016）。σ目標と最寄り抵抗線の min（価格欠損行は現在値なしで目標のみ）。
+      const srStock = srForCode(getSrLevels(), r.code);
       const tpCell = hasTp
-        ? sellTargetCell(r.avg, r.priced ? r.price : null, sigmaMap[r.code], tpParams, yen)
+        ? sellTargetCell(
+            r.avg, r.priced ? r.price : null, sigmaMap[r.code], tpParams, yen,
+            srStock ? srStock.resistance : null
+          )
         : "";
       // 支持線・抵抗線（TBK-0014）。価格欠損行は配信時 close 基準で振り分ける。
       const srTd = hasSr ? srCell(r.code, r.priced ? r.price : null, yen) : "";
