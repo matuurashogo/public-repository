@@ -33,12 +33,6 @@ export function buildChartModel(rows, sr, lastN = 250) {
   return { labels, close, srLines, hasData: close.length > 0 };
 }
 
-// 現在値に対する距離率（(level - price)/price）。price 不正なら null。
-function distPct(level, price) {
-  if (!(price > 0) || typeof level !== "number" || !isFinite(level)) return null;
-  return (level - price) / price;
-}
-
 // 情報セクション用の view-model を組み立てる純粋関数。
 // 入力（すべて任意。無いものは対応セクションを null にする）:
 //   code, name, currentPrice, priceIsIntraday
@@ -63,15 +57,18 @@ export function buildDetailSections(input) {
     snapshot = null,
   } = input || {};
 
-  // 支持線・抵抗線（現在値に対する距離つき・近い順）
+  // 支持線・抵抗線（タッチ回数=信頼度つき・近い順。TBK-0015。距離%は表示しない方針）
   const srSection = (() => {
     if (!sr) return null;
-    const support = (sr.support || [])
-      .filter((v) => typeof v === "number")
-      .map((v) => ({ price: v, dist: distPct(v, currentPrice) }));
-    const resistance = (sr.resistance || [])
-      .filter((v) => typeof v === "number")
-      .map((v) => ({ price: v, dist: distPct(v, currentPrice) }));
+    const withTouches = (prices, touches) =>
+      (prices || [])
+        .map((v, i) => ({
+          price: v,
+          touches: Array.isArray(touches) && Number.isFinite(touches[i]) ? touches[i] : 0,
+        }))
+        .filter((x) => typeof x.price === "number");
+    const support = withTouches(sr.support, sr.support_touches);
+    const resistance = withTouches(sr.resistance, sr.resistance_touches);
     if (!support.length && !resistance.length) return null;
     return { support, resistance };
   })();
@@ -90,13 +87,16 @@ export function buildDetailSections(input) {
   // 連れ安度（buy_levels の tsureyasu をそのまま渡す。表示可否は描画側で判定）
   const tsureyasu = buyStock && buyStock.tsureyasu ? buyStock.tsureyasu : null;
 
-  // 利確目標（σ20＋保有取得単価。保有していなければ幅だけ＝目安）
+  // 利確目標（σ20＋保有取得単価。保有していなければ幅だけ＝目安）。
+  // 取得単価より上に抵抗線があれば min(σ目標, 最寄り抵抗線) を採用する（TBK-0016）。
   const sellTarget = (() => {
     if (typeof sigma !== "number" || !volParams) return null;
     const width = targetWidth(sigma, volParams);
     const avg = holding && holding.avg > 0 ? holding.avg : null;
-    const t = avg ? computeSellTarget(avg, currentPrice, sigma, volParams) : null;
-    return { sigma, width, target: t }; // t は保有時のみ（目標価格・到達判定つき）
+    const t = avg
+      ? computeSellTarget(avg, currentPrice, sigma, volParams, sr ? sr.resistance : null)
+      : null;
+    return { sigma, width, target: t }; // t は保有時のみ（目標価格・到達判定・basis つき）
   })();
 
   // 客観指標スナップショット（indicators 最新行）

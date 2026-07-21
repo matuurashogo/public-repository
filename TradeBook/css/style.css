@@ -451,3 +451,4 @@ body.modal-open { overflow: hidden; }
 .d-row span { color: #5a5a5e; }
 .d-row b { font-weight: 600; text-align: right; }
 .d-row small { font-size: 11px; color: #8a8a8e; font-weight: 500; }
+.h-tp-basis { display: block; color: #b0b0b5; font-size: 9px; }

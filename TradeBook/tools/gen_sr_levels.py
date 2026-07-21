@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""支持線・抵抗線のデータ (data/sr_levels.json) を生成する（TBK-0014）。
+"""支持線・抵抗線のデータ (data/sr_levels.json) を生成する（TBK-0015。初版は TBK-0014）。
 
 監視リスト（data/indicators_universe.json）の銘柄について、HypoLab の S/R エンジン
 （srlevels・HYP-0005 共通プロトコル）と同一定義の**スイング水準**を計算し、
@@ -20,14 +20,15 @@
     TRADEBOOK_DATA_SOURCE=r2 python tools/gen_sr_levels.py
     TRADEBOOK_R2_URL_BASE=/path/to/silver-mirror python tools/gen_sr_levels.py  # ミラー検証用
 
-出力 data/sr_levels.json（データ契約は TBK-0014）:
+出力 data/sr_levels.json（データ契約は TBK-0015）:
   {
     "updated": "2026-07-17",
     "source": "qdp-r2 fact_prices_daily (調整後四本値)",
     "params": { "swing_n": 4, "prom_atr": 0.5, "life_days": 120, "merge_pct": 0.01,
-                "atr_window": 14, "max_levels": 3 },
-    "stocks": [ { "code": "7203", "close": 3000, "support": [2900.5, 2750],
-                  "resistance": [3100, 3250] }, ... ]   # 近い順・最大 max_levels 本
+                "atr_window": 14, "max_levels": 3, "touch_band_atr": 0.5, "touch_cooldown": 10 },
+    "stocks": [ { "code": "7203", "close": 3000,
+                  "support": [2900.5, 2750], "resistance": [3100, 3250],   # 近い順・最大 max_levels 本
+                  "support_touches": [3, 1], "resistance_touches": [2, 0] } ]  # 価格と同順の並行配列
   }
 """
 
@@ -43,13 +44,15 @@ PUBLIC_ROOT = HERE.parent
 UNIVERSE_FILE = PUBLIC_ROOT / "data" / "indicators_universe.json"
 OUT_FILE = PUBLIC_ROOT / "data" / "sr_levels.json"
 
-# パラメータ（HypoLab config.toml [sr] の検証済み値と一致させる。変更は TBK-0014 の改訂とセット）
+# パラメータ（HypoLab config.toml [sr] の検証済み値と一致させる。変更は TBK-0015 の改訂とセット）
 SWING_N = 4          # スイング判定の前後日数
 PROM_ATR = 0.5       # プロミネンス条件（× ATR14）
 LIFE_DAYS = 120      # 水準の有効期間（営業日）
 MERGE_PCT = 0.01     # ±1% 以内の重複水準は古い方に統合
 ATR_WINDOW = 14
 MAX_LEVELS = 3       # 支持・抵抗それぞれの出力本数上限
+TOUCH_BAND_ATR = 0.5  # タッチ判定バンド = ±0.5×ATR（HYP-0005 band_atr と一致）
+TOUCH_COOLDOWN = 10   # 同一水準の再タッチ除外（HYP-0005 cooldown_days と一致）
 
 # 必要履歴: 寿命 120 + ATR ウォームアップ + スイング確定遅延 + 余裕（休場ズレ）
 INPUT_DAYS = LIFE_DAYS + ATR_WINDOW + 2 * SWING_N + 20
@@ -130,17 +133,45 @@ def merge_close_levels(levels: list[dict], merge_pct: float = MERGE_PCT) -> list
     return kept
 
 
+def count_touches(level: float, birth: int, expire: int, h, l, atr,  # noqa: E741
+                  band_atr: float = TOUCH_BAND_ATR, cooldown: int = TOUCH_COOLDOWN) -> int:
+    """水準の誕生後〜最終日に、日中レンジがバンド（±band_atr×ATR）内へ入った回数（PIT 安全）。
+
+    連続日は1回に数える（cooldown 日スキップ・HYP-0005 と同じ考え方）。回数が多いほど
+    「市場が何度も意識した水準」＝信頼度の代理指標（タッチ後の反発までは検証しない）。
+    """
+    import numpy as np
+
+    touches = 0
+    t = birth
+    t_end = min(expire, len(h) - 1)
+    while t <= t_end:
+        a = atr[t]
+        if not np.isnan(a):
+            band = band_atr * a
+            if l[t] - band <= level <= h[t] + band:
+                touches += 1
+                t += cooldown + 1
+                continue
+        t += 1
+    return touches
+
+
 def pick_levels(levels: list[dict], t_last: int, close: float,
                 max_levels: int = MAX_LEVELS) -> dict:
     """最終日 t_last 時点で有効（birth <= t_last <= expire）な水準を支持/抵抗に振り分ける。
 
-    現在値より下＝支持線（近い順＝降順）、上＝抵抗線（近い順＝昇順）。
+    現在値より下＝支持線（近い順＝降順）、上＝抵抗線（近い順＝昇順）。各水準は
+    {level, touches} を保持する（touches 未算出の水準は 0）。
     現在値と一致する水準は抵抗側に含めない（支持側にも含めない＝表示上の曖昧さ回避）。
     """
     active = [lv for lv in levels if lv["birth"] <= t_last <= lv["expire"]]
-    support = sorted((lv["level"] for lv in active if lv["level"] < close), reverse=True)
-    resistance = sorted(lv["level"] for lv in active if lv["level"] > close)
-    return {"support": support[:max_levels], "resistance": resistance[:max_levels]}
+    sup = sorted((lv for lv in active if lv["level"] < close),
+                 key=lambda x: x["level"], reverse=True)[:max_levels]
+    res = sorted((lv for lv in active if lv["level"] > close),
+                 key=lambda x: x["level"])[:max_levels]
+    pack = lambda lvs: [{"level": lv["level"], "touches": int(lv.get("touches", 0))} for lv in lvs]  # noqa: E731
+    return {"support": pack(sup), "resistance": pack(res)}
 
 
 def compute_sr(panel, max_levels: int = MAX_LEVELS) -> dict:
@@ -167,6 +198,8 @@ def compute_sr(panel, max_levels: int = MAX_LEVELS) -> dict:
             continue
         atr = atr_series(h, l, c, ATR_WINDOW)
         levels = merge_close_levels(gen_swing_levels(h, l, c, atr))
+        for lv in levels:
+            lv["touches"] = count_touches(lv["level"], lv["birth"], lv["expire"], h, l, atr)
         close = float(c[-1])
         picked = pick_levels(levels, len(c) - 1, close, max_levels)
         if not picked["support"] and not picked["resistance"]:
@@ -176,8 +209,11 @@ def compute_sr(panel, max_levels: int = MAX_LEVELS) -> dict:
             {
                 "code": str(code4),
                 "close": round(close, 1),
-                "support": [round(v, 1) for v in picked["support"]],
-                "resistance": [round(v, 1) for v in picked["resistance"]],
+                # support/resistance は価格のみの配列（後方互換）。touches は並行配列で追加（TBK-0015）
+                "support": [round(x["level"], 1) for x in picked["support"]],
+                "resistance": [round(x["level"], 1) for x in picked["resistance"]],
+                "support_touches": [x["touches"] for x in picked["support"]],
+                "resistance_touches": [x["touches"] for x in picked["resistance"]],
             }
         )
 
@@ -193,6 +229,8 @@ def compute_sr(panel, max_levels: int = MAX_LEVELS) -> dict:
             "merge_pct": MERGE_PCT,
             "atr_window": ATR_WINDOW,
             "max_levels": max_levels,
+            "touch_band_atr": TOUCH_BAND_ATR,
+            "touch_cooldown": TOUCH_COOLDOWN,
         },
         "stocks": stocks,
     }
@@ -219,7 +257,7 @@ def main() -> int:
     if not datasource.use_r2():
         print(
             "gen_sr_levels.py は調整後高安（adj_high/adj_low）が必要なため "
-            "TRADEBOOK_DATA_SOURCE=r2 でのみ実行できます（TBK-0014。jquants-data は終値系のみ）。",
+            "TRADEBOOK_DATA_SOURCE=r2 でのみ実行できます（TBK-0015。jquants-data は終値系のみ）。",
             file=sys.stderr,
         )
         return 2
