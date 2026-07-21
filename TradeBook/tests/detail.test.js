@@ -33,27 +33,44 @@ test("buildChartModel: 不正・空入力はクラッシュせず hasData=false"
   assert.deepEqual(m.close, [100]);
 });
 
-test("buildDetailSections: S/R にタッチ回数（並行配列）を対応付ける（TBK-0015）", () => {
+test("buildDetailSections: S/R にタッチ回数・反発率を対応付ける（TBK-0017）", () => {
   const s = buildDetailSections({
     code: "7203",
     currentPrice: 3000,
     sr: {
       support: [2900, 2750],
       resistance: [3100],
-      support_touches: [3, 1],
+      support_touches: [4, 1],
+      support_reversals: [3, 0],
       resistance_touches: [2],
+      resistance_reversals: [1],
     },
   });
-  assert.deepEqual(s.sr.support, [
-    { price: 2900, touches: 3 },
-    { price: 2750, touches: 1 },
-  ]);
-  assert.deepEqual(s.sr.resistance, [{ price: 3100, touches: 2 }]);
+  assert.equal(s.sr.support[0].touches, 4);
+  assert.equal(s.sr.support[0].reversals, 3);
+  assert.ok(Math.abs(s.sr.support[0].reversalRate - 3 / 4) < 1e-12);
+  assert.equal(s.sr.support[1].reversalRate, 0); // 1タッチ0反発 → 0%
+  assert.ok(Math.abs(s.sr.resistance[0].reversalRate - 0.5) < 1e-12);
 });
 
-test("buildDetailSections: touches 未配信（旧契約データ）は 0 扱いで完走", () => {
+test("buildDetailSections: touches=0 は reversalRate=null・未配信は 0 扱いで完走", () => {
   const s = buildDetailSections({ code: "1", currentPrice: null, sr: { support: [100], resistance: [] } });
-  assert.deepEqual(s.sr.support, [{ price: 100, touches: 0 }]);
+  assert.deepEqual(s.sr.support, [{ price: 100, touches: 0, reversals: 0, reversalRate: null }]);
+});
+
+test("buildDetailSections: 上値メド=現在値より上の最寄り抵抗線（TBK-0018）", () => {
+  // 含み損想定: 現在5960、抵抗は全部その上。最寄り6080を上値メドに
+  const s = buildDetailSections({
+    code: "6855", currentPrice: 5960,
+    sr: { support: [], resistance: [6080, 6350, 6470] },
+  });
+  assert.equal(s.overhead.price, 6080);
+  assert.ok(Math.abs(s.overhead.dist - (6080 - 5960) / 5960) < 1e-12);
+});
+
+test("buildDetailSections: 現在値より上に抵抗線が無ければ上値メドは null", () => {
+  const s = buildDetailSections({ code: "1", currentPrice: 5000, sr: { support: [4800], resistance: [] } });
+  assert.equal(s.overhead, null);
 });
 
 test("buildDetailSections: 買いレベルを整形して渡す", () => {

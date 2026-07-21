@@ -452,3 +452,7 @@ body.modal-open { overflow: hidden; }
 .d-row b { font-weight: 600; text-align: right; }
 .d-row small { font-size: 11px; color: #8a8a8e; font-weight: 500; }
 .h-tp-basis { display: block; color: #b0b0b5; font-size: 9px; }
+/* 反発率＝信頼度の色分け（TBK-0017・詳細モーダル） */
+.sr-strong { color: var(--gain); font-weight: 700; }
+.sr-mid { color: #8a5a00; }
+.sr-weak { color: #8a8a8e; }

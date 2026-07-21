@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gen_sr_levels.py の単体テスト（TBK-0015）。
+"""gen_sr_levels.py の単体テスト（TBK-0017）。
 
 スイング水準の判定・PIT 安全性（誕生日 = 極値日 + n）・統合・支持/抵抗の振り分けを検証する。
 HypoLab srlevels（HYP-0005）と同一定義であることが契約。
@@ -104,41 +104,69 @@ class TestMergeAndPick(unittest.TestCase):
 
     def test_pick_levels_carries_touches(self):
         levels = [
-            {"level": 95.0, "birth": 0, "expire": 999, "def_id": "swing", "kind": "low", "touches": 3},
+            {"level": 95.0, "birth": 0, "expire": 999, "def_id": "swing", "kind": "low",
+             "touches": 3, "reversals": 2},
         ]
         picked = g.pick_levels(levels, t_last=10, close=100.0)
-        self.assertEqual(picked["support"], [{"level": 95.0, "touches": 3}])
+        self.assertEqual(picked["support"], [{"level": 95.0, "touches": 3, "reversals": 2}])
 
 
 class TestCountTouches(unittest.TestCase):
-    """タッチ回数（信頼度の代理・TBK-0015）: バンド接触の回数をクールダウン付きで数える。"""
+    """タッチ＝バンド外からの接近（HYP-0005 detect_touches 移植・TBK-0017）＋反発判定。"""
 
-    def _atr(self, h, l, c):  # noqa: E741
-        return g.atr_series(h, l, c)
+    def _series(self, closes, highs=None, lows=None):
+        import numpy as np
+        c = list(map(float, closes))
+        h = list(map(float, highs)) if highs else [x + 0.5 for x in c]
+        l = list(map(float, lows)) if lows else [x - 0.5 for x in c]  # noqa: E741
+        atr = g.atr_series(h, l, c)
+        # ATR ウォームアップ後を使いたいので np 配列で返す
+        return np.array(h), np.array(l), np.array(c), atr
 
-    def test_two_separated_touches(self):
-        """クールダウンより離れた2回の接近は2回と数える。"""
-        h, l, c = _flat_series(60)  # 価格100・ATR≈0.2
-        level = 100.0  # フラット系列は毎日バンド内 → クールダウンで間引かれる
-        atr = self._atr(h, l, c)
-        # birth=20〜59 の40日間、毎日バンド内 → 11日ごとに1回 = ceil(40/11) = 4回
-        self.assertEqual(g.count_touches(level, 20, 999, h, l, atr), 4)
-
-    def test_far_level_never_touched(self):
+    def test_flat_series_has_no_touch(self):
+        """フラット系列は前日終値が常にバンド内 → 外からの接近が無い＝タッチ0（旧定義との違い）。"""
         h, l, c = _flat_series(60)
-        atr = self._atr(h, l, c)
-        self.assertEqual(g.count_touches(150.0, 20, 999, h, l, atr), 0)
+        import numpy as np
+        h, l, c = np.array(h), np.array(l), np.array(c)  # noqa: E741
+        atr = g.atr_series(h, l, c)
+        self.assertEqual(g.count_touches(100.0, 20, 999, h, l, c, atr), (0, 0))
+
+    def test_approach_from_above_then_reversal(self):
+        """上から支持線へ接近して反発（上昇）した1タッチ＝(1, 1)。"""
+        # 20日フラット(100) → 30で支持95へ急落接近 → その後 反発して上昇
+        closes = [100.0] * 30 + [95.2, 98.0, 99.0, 100.0, 101.0] + [101.0] * 20
+        lows = [c - 0.4 for c in closes]
+        lows[30] = 94.9  # 支持95のバンド内へ下ヒゲ
+        highs = [c + 0.4 for c in closes]
+        import numpy as np
+        h, l, c = np.array(highs), np.array(lows), np.array(closes)  # noqa: E741
+        atr = g.atr_series(h, l, c)
+        t, r = g.count_touches(95.0, 20, 999, h, l, c, atr)
+        self.assertEqual(t, 1)
+        self.assertEqual(r, 1)  # 反発した
+
+    def test_approach_then_break_is_touch_but_no_reversal(self):
+        """接近後にバンドを割って続落＝タッチ1・反発0。"""
+        closes = [100.0] * 30 + [95.1, 93.0, 92.0, 91.0, 90.0] + [90.0] * 20
+        lows = [c - 0.4 for c in closes]
+        highs = [c + 0.4 for c in closes]
+        import numpy as np
+        h, l, c = np.array(highs), np.array(lows), np.array(closes)  # noqa: E741
+        atr = g.atr_series(h, l, c)
+        t, r = g.count_touches(95.0, 20, 999, h, l, c, atr)
+        self.assertEqual(t, 1)
+        self.assertEqual(r, 0)  # 割れたので反発ではない
 
     def test_touch_only_after_birth(self):
         """誕生日前の接近は数えない（PIT 安全）。"""
-        h, l, c = _flat_series(60)
-        # 30日目だけ 120 に接近する高値
-        h[30] = 120.0
-        atr = self._atr(h, l, c)
-        # birth=40（接近日30より後）→ 0回
-        self.assertEqual(g.count_touches(120.0, 40, 999, h, l, atr), 0)
-        # birth=25（接近日30を含む）→ 1回
-        self.assertEqual(g.count_touches(120.0, 25, 999, h, l, atr), 1)
+        closes = [100.0] * 30 + [95.1, 98.0, 100.0, 101.0, 101.0] + [101.0] * 20
+        lows = [c - 0.4 for c in closes]
+        highs = [c + 0.4 for c in closes]
+        import numpy as np
+        h, l, c = np.array(highs), np.array(lows), np.array(closes)  # noqa: E741
+        atr = g.atr_series(h, l, c)
+        self.assertEqual(g.count_touches(95.0, 40, 999, h, l, c, atr)[0], 0)  # 接近日30より後生まれ
+        self.assertEqual(g.count_touches(95.0, 25, 999, h, l, c, atr)[0], 1)
 
 
 class TestComputeSr(unittest.TestCase):
@@ -167,8 +195,13 @@ class TestComputeSr(unittest.TestCase):
         self.assertEqual(len(s["support_touches"]), len(s["support"]))
         self.assertEqual(len(s["resistance_touches"]), len(s["resistance"]))
         self.assertTrue(all(isinstance(t, int) and t >= 0 for t in s["support_touches"]))
-        self.assertEqual(payload["params"]["touch_band_atr"], g.TOUCH_BAND_ATR)
-        self.assertEqual(payload["params"]["touch_cooldown"], g.TOUCH_COOLDOWN)
+        # TBK-0017: reversals も並行配列・0<=reversals<=touches
+        self.assertEqual(len(s["support_reversals"]), len(s["support"]))
+        self.assertEqual(len(s["resistance_reversals"]), len(s["resistance"]))
+        for tch, rev in zip(s["support_touches"], s["support_reversals"]):
+            self.assertTrue(0 <= rev <= tch)
+        self.assertEqual(payload["params"]["reversal_atr"], g.REVERSAL_ATR)
+        self.assertEqual(payload["params"]["react_days"], g.REACT_DAYS)
 
     def test_missing_high_low_falls_back_to_close(self):
         """高安欠損日は終値埋め（水準が誤って増えない・クラッシュしない）。"""

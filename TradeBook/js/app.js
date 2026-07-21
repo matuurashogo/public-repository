@@ -515,31 +515,41 @@ function renderDetailSections(m) {
       <div class="d-row"><span>含み損益</span><b>${val}</b></div>`));
   }
 
-  // 支持線・抵抗線（タッチ回数=その水準が意識された回数。距離%は出さない・TBK-0015）
+  // 支持線・抵抗線（反発率=信頼度。タッチのうち実際に反発した割合。距離%は出さない・TBK-0017）
   if (m.sr) {
-    const touchLabel = (n) =>
-      n > 0
-        ? `<small title="この水準の価格帯で取引された回数（多いほど市場に意識されている）">タッチ${n}回</small>`
-        : `<small class="muted" title="水準誕生後まだ試されていない">未検証</small>`;
+    const relLabel = (o) => {
+      if (o.touches <= 0)
+        return '<small class="muted" title="水準誕生後まだ試されていない">未検証</small>';
+      const rate = Math.round(o.reversalRate * 100);
+      const strong = rate >= 60 ? "sr-strong" : rate >= 40 ? "sr-mid" : "sr-weak";
+      return `<small class="${strong}" title="タッチ${o.touches}回のうち${o.reversals}回そこで反発（＝信頼度）">反発 ${o.reversals}/${o.touches}（${rate}%）</small>`;
+    };
     const line = (o, cls, mark) =>
-      `<div class="d-row"><span class="${cls}">${mark} ${Math.round(o.price).toLocaleString("ja-JP")}</span><b>${touchLabel(o.touches)}</b></div>`;
+      `<div class="d-row"><span class="${cls}">${mark} ${Math.round(o.price).toLocaleString("ja-JP")}</span><b>${relLabel(o)}</b></div>`;
     const res = m.sr.resistance.map((o) => line(o, "loss", "抵抗")).join("");
     const sup = m.sr.support.map((o) => line(o, "gain", "支持")).join("");
-    blocks.push(detailBlock("支持線・抵抗線", (res || "") + (sup || "") || '<div class="muted">水準なし</div>'));
+    blocks.push(detailBlock("支持線・抵抗線（反発率＝信頼度）", (res || "") + (sup || "") || '<div class="muted">水準なし</div>'));
   }
 
-  // 利確目標（σ連動＋抵抗線連動 min・TBK-0016）
-  if (m.sellTarget) {
-    const t = m.sellTarget;
-    let body = `<div class="d-row"><span>σ20</span><b>${(t.sigma * 100).toFixed(1)}%</b></div>
-      <div class="d-row"><span>σ利確幅（参考）</span><b>${t.width == null ? "—" : formatPct(t.width)}</b></div>`;
-    if (t.target) {
-      const basis = t.target.basis === "resistance" ? "抵抗線" : "σ連動";
-      const dist = t.target.dist == null ? "" : `（あと ${formatPct(t.target.dist)}）`;
-      const hit = t.target.hit ? '<span class="gain">🎯到達</span>' : "";
-      body += `<div class="d-row"><span>利確目標価格</span><b>${Math.round(t.target.targetPrice).toLocaleString("ja-JP")} <small>${basis}</small> ${hit}${dist}</b></div>`;
+  // 利確目標（σ連動＋抵抗線連動 min・TBK-0016）＋上値メド（現在値基準・TBK-0018）
+  if (m.sellTarget || m.overhead) {
+    let body = "";
+    if (m.sellTarget) {
+      const t = m.sellTarget;
+      body += `<div class="d-row"><span>σ20</span><b>${(t.sigma * 100).toFixed(1)}%</b></div>
+        <div class="d-row"><span>σ利確幅（参考）</span><b>${t.width == null ? "—" : formatPct(t.width)}</b></div>`;
+      if (t.target) {
+        const basis = t.target.basis === "resistance" ? "抵抗線" : "σ連動";
+        const dist = t.target.dist == null ? "" : `（あと ${formatPct(t.target.dist)}）`;
+        const hit = t.target.hit ? '<span class="gain">🎯到達</span>' : "";
+        body += `<div class="d-row"><span>利確目標価格</span><b>${Math.round(t.target.targetPrice).toLocaleString("ja-JP")} <small>${basis}</small> ${hit}${dist}</b></div>`;
+      }
     }
-    blocks.push(detailBlock("利確目標", body));
+    // 上値メド: 現在値のすぐ上の抵抗線（含み損で利確目標が遠いときの実用的な戻りメド）
+    if (m.overhead) {
+      body += `<div class="d-row"><span>上値メド（直上の抵抗線）</span><b>${Math.round(m.overhead.price).toLocaleString("ja-JP")} <small>あと ${formatPct(m.overhead.dist)}</small></b></div>`;
+    }
+    blocks.push(detailBlock("利確目標・上値メド", body));
   }
 
   // 買いレベル L1〜L6

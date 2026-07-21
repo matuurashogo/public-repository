@@ -57,20 +57,33 @@ export function buildDetailSections(input) {
     snapshot = null,
   } = input || {};
 
-  // 支持線・抵抗線（タッチ回数=信頼度つき・近い順。TBK-0015。距離%は表示しない方針）
+  // 支持線・抵抗線（タッチ回数＋反発率=信頼度つき・近い順。TBK-0017。距離%は出さない）
   const srSection = (() => {
     if (!sr) return null;
-    const withTouches = (prices, touches) =>
+    const pack = (prices, touches, reversals) =>
       (prices || [])
-        .map((v, i) => ({
-          price: v,
-          touches: Array.isArray(touches) && Number.isFinite(touches[i]) ? touches[i] : 0,
-        }))
+        .map((v, i) => {
+          const t = Array.isArray(touches) && Number.isFinite(touches[i]) ? touches[i] : 0;
+          const r = Array.isArray(reversals) && Number.isFinite(reversals[i]) ? reversals[i] : 0;
+          return { price: v, touches: t, reversals: r, reversalRate: t > 0 ? r / t : null };
+        })
         .filter((x) => typeof x.price === "number");
-    const support = withTouches(sr.support, sr.support_touches);
-    const resistance = withTouches(sr.resistance, sr.resistance_touches);
+    const support = pack(sr.support, sr.support_touches, sr.support_reversals);
+    const resistance = pack(sr.resistance, sr.resistance_touches, sr.resistance_reversals);
     if (!support.length && !resistance.length) return null;
     return { support, resistance };
+  })();
+
+  // 上値メド（TBK-0018）: 現在値より上の最寄り抵抗線。含み損で利確目標が遠いときの実用指標。
+  // 利確目標（取得単価より上の抵抗線＝プラス時のみ）とは別に、現在値基準で常に出す。
+  const overhead = (() => {
+    if (!sr || !(currentPrice > 0)) return null;
+    const above = (sr.resistance || [])
+      .filter((v) => typeof v === "number" && v > currentPrice)
+      .sort((a, b) => a - b);
+    if (!above.length) return null;
+    const price = above[0];
+    return { price, dist: (price - currentPrice) / currentPrice };
   })();
 
   // 買いレベル L1〜L6（buy_levels の levels をそのまま整形）
@@ -128,6 +141,7 @@ export function buildDetailSections(input) {
     currentPrice,
     priceIsIntraday,
     sr: srSection,
+    overhead,
     buyLevels,
     tsureyasu,
     sellTarget,
