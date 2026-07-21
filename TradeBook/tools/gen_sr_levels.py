@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""支持線・抵抗線のデータ (data/sr_levels.json) を生成する（TBK-0015。初版は TBK-0014）。
+"""支持線・抵抗線のデータ (data/sr_levels.json) を生成する（TBK-0017。初版は TBK-0014/0015）。
 
 監視リスト（data/indicators_universe.json）の銘柄について、HypoLab の S/R エンジン
 （srlevels・HYP-0005 共通プロトコル）と同一定義の**スイング水準**を計算し、
@@ -20,15 +20,17 @@
     TRADEBOOK_DATA_SOURCE=r2 python tools/gen_sr_levels.py
     TRADEBOOK_R2_URL_BASE=/path/to/silver-mirror python tools/gen_sr_levels.py  # ミラー検証用
 
-出力 data/sr_levels.json（データ契約は TBK-0015）:
+出力 data/sr_levels.json（データ契約は TBK-0017）:
   {
     "updated": "2026-07-17",
     "source": "qdp-r2 fact_prices_daily (調整後四本値)",
     "params": { "swing_n": 4, "prom_atr": 0.5, "life_days": 120, "merge_pct": 0.01,
-                "atr_window": 14, "max_levels": 3, "touch_band_atr": 0.5, "touch_cooldown": 10 },
+                "atr_window": 14, "max_levels": 3, "touch_band_atr": 0.5, "touch_cooldown": 10,
+                "reversal_atr": 1.0, "react_days": 5 },
     "stocks": [ { "code": "7203", "close": 3000,
                   "support": [2900.5, 2750], "resistance": [3100, 3250],   # 近い順・最大 max_levels 本
-                  "support_touches": [3, 1], "resistance_touches": [2, 0] } ]  # 価格と同順の並行配列
+                  "support_touches": [3, 1], "resistance_touches": [2, 0],   # 価格と同順の並行配列
+                  "support_reversals": [2, 0], "resistance_reversals": [1, 0] } ]  # うち反発した回数
   }
 """
 
@@ -53,6 +55,8 @@ ATR_WINDOW = 14
 MAX_LEVELS = 3       # 支持・抵抗それぞれの出力本数上限
 TOUCH_BAND_ATR = 0.5  # タッチ判定バンド = ±0.5×ATR（HYP-0005 band_atr と一致）
 TOUCH_COOLDOWN = 10   # 同一水準の再タッチ除外（HYP-0005 cooldown_days と一致）
+REVERSAL_ATR = 1.0    # 反転判定の逆方向移動 = 1.0×ATR（HYP-0005 reversal_atr と一致）
+REACT_DAYS = 5        # タッチ後の反発/ブレイク判定窓（HYP-0005 react_days と一致）
 
 # 必要履歴: 寿命 120 + ATR ウォームアップ + スイング確定遅延 + 余裕（休場ズレ）
 INPUT_DAYS = LIFE_DAYS + ATR_WINDOW + 2 * SWING_N + 20
@@ -133,28 +137,60 @@ def merge_close_levels(levels: list[dict], merge_pct: float = MERGE_PCT) -> list
     return kept
 
 
-def count_touches(level: float, birth: int, expire: int, h, l, atr,  # noqa: E741
-                  band_atr: float = TOUCH_BAND_ATR, cooldown: int = TOUCH_COOLDOWN) -> int:
-    """水準の誕生後〜最終日に、日中レンジがバンド（±band_atr×ATR）内へ入った回数（PIT 安全）。
+def _is_reversal(t: int, level: float, direction: str, h, l, c, atr_t: float,  # noqa: E741
+                 band: float, reversal_atr: float, react: int) -> bool:
+    """タッチ後 react 日以内に「逆方向へ reversal_atr×ATR 動き、かつバンドの向こうへ終値が
+    抜けなかった」＝反発したかを判定する（HYP-0005 classify_outcome の reversal 部分を移植）。"""
+    n = len(c)
+    ws, we = t + 1, min(t + 1 + react, n)
+    if ws >= n:
+        return False
+    closes = c[ws:we]
+    if direction == "below":  # 抵抗テスト（下から接近）→ 反落したか
+        far = level + band
+        return (l[ws:we].min() <= c[t] - reversal_atr * atr_t) and (closes.max() <= far)
+    # 支持テスト（上から接近）→ 反発（上昇）したか
+    far = level - band
+    return (h[ws:we].max() >= c[t] + reversal_atr * atr_t) and (closes.min() >= far)
 
-    連続日は1回に数える（cooldown 日スキップ・HYP-0005 と同じ考え方）。回数が多いほど
-    「市場が何度も意識した水準」＝信頼度の代理指標（タッチ後の反発までは検証しない）。
+
+def count_touches(level: float, birth: int, expire: int, h, l, c, atr,  # noqa: E741
+                  band_atr: float = TOUCH_BAND_ATR, cooldown: int = TOUCH_COOLDOWN,
+                  reversal_atr: float = REVERSAL_ATR, react: int = REACT_DAYS) -> tuple[int, int]:
+    """水準の誕生後〜有効期間に「バンド外から接近しバンドへ入った」タッチ回数と、
+    そのうち反発した回数を返す（PIT 安全・HYP-0005 detect_touches を移植）。
+
+    タッチ = 前日終値がバンド外 かつ 当日レンジがバンドに触れる（＝外からの接近）。
+    連続日は cooldown 日スキップで1回に数える。反発率 = 反発数 / タッチ数（呼び側で算出）。
     """
     import numpy as np
 
+    n = len(c)
+    start = max(birth, 1)
+    end = min(expire + 1, n)
     touches = 0
-    t = birth
-    t_end = min(expire, len(h) - 1)
-    while t <= t_end:
+    reversals = 0
+    last_touch = -(10 ** 9)
+    for t in range(start, end):
         a = atr[t]
-        if not np.isnan(a):
-            band = band_atr * a
-            if l[t] - band <= level <= h[t] + band:
-                touches += 1
-                t += cooldown + 1
-                continue
-        t += 1
-    return touches
+        if np.isnan(a):
+            continue
+        band = band_atr * a
+        hi, lo = level + band, level - band
+        prev_c = c[t - 1]
+        # バンドに触れる ∧ 前日終値がバンド外（外からの接近）
+        if not (l[t] <= hi and h[t] >= lo):
+            continue
+        if not (prev_c < lo or prev_c > hi):
+            continue
+        if t - last_touch <= cooldown:
+            continue
+        last_touch = t
+        touches += 1
+        direction = "below" if prev_c < lo else "above"
+        if _is_reversal(t, level, direction, h, l, c, a, band, reversal_atr, react):
+            reversals += 1
+    return touches, reversals
 
 
 def pick_levels(levels: list[dict], t_last: int, close: float,
@@ -170,7 +206,11 @@ def pick_levels(levels: list[dict], t_last: int, close: float,
                  key=lambda x: x["level"], reverse=True)[:max_levels]
     res = sorted((lv for lv in active if lv["level"] > close),
                  key=lambda x: x["level"])[:max_levels]
-    pack = lambda lvs: [{"level": lv["level"], "touches": int(lv.get("touches", 0))} for lv in lvs]  # noqa: E731
+    pack = lambda lvs: [  # noqa: E731
+        {"level": lv["level"], "touches": int(lv.get("touches", 0)),
+         "reversals": int(lv.get("reversals", 0))}
+        for lv in lvs
+    ]
     return {"support": pack(sup), "resistance": pack(res)}
 
 
@@ -199,7 +239,9 @@ def compute_sr(panel, max_levels: int = MAX_LEVELS) -> dict:
         atr = atr_series(h, l, c, ATR_WINDOW)
         levels = merge_close_levels(gen_swing_levels(h, l, c, atr))
         for lv in levels:
-            lv["touches"] = count_touches(lv["level"], lv["birth"], lv["expire"], h, l, atr)
+            lv["touches"], lv["reversals"] = count_touches(
+                lv["level"], lv["birth"], lv["expire"], h, l, c, atr
+            )
         close = float(c[-1])
         picked = pick_levels(levels, len(c) - 1, close, max_levels)
         if not picked["support"] and not picked["resistance"]:
@@ -209,11 +251,13 @@ def compute_sr(panel, max_levels: int = MAX_LEVELS) -> dict:
             {
                 "code": str(code4),
                 "close": round(close, 1),
-                # support/resistance は価格のみの配列（後方互換）。touches は並行配列で追加（TBK-0015）
+                # support/resistance は価格のみ（後方互換）。touches / reversals は並行配列（TBK-0017）
                 "support": [round(x["level"], 1) for x in picked["support"]],
                 "resistance": [round(x["level"], 1) for x in picked["resistance"]],
                 "support_touches": [x["touches"] for x in picked["support"]],
                 "resistance_touches": [x["touches"] for x in picked["resistance"]],
+                "support_reversals": [x["reversals"] for x in picked["support"]],
+                "resistance_reversals": [x["reversals"] for x in picked["resistance"]],
             }
         )
 
@@ -231,6 +275,8 @@ def compute_sr(panel, max_levels: int = MAX_LEVELS) -> dict:
             "max_levels": max_levels,
             "touch_band_atr": TOUCH_BAND_ATR,
             "touch_cooldown": TOUCH_COOLDOWN,
+            "reversal_atr": REVERSAL_ATR,
+            "react_days": REACT_DAYS,
         },
         "stocks": stocks,
     }
@@ -257,7 +303,7 @@ def main() -> int:
     if not datasource.use_r2():
         print(
             "gen_sr_levels.py は調整後高安（adj_high/adj_low）が必要なため "
-            "TRADEBOOK_DATA_SOURCE=r2 でのみ実行できます（TBK-0015。jquants-data は終値系のみ）。",
+            "TRADEBOOK_DATA_SOURCE=r2 でのみ実行できます（TBK-0017。jquants-data は終値系のみ）。",
             file=sys.stderr,
         )
         return 2
